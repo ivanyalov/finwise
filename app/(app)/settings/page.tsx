@@ -1,0 +1,432 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+import { useStore } from "@/lib/store/useStore";
+import { IncomeSource, ExpenseCategory } from "@/lib/types";
+import { Card, CardHeader, CardContent } from "@/components/ui/Card";
+import { Modal } from "@/components/ui/Modal";
+import Input from "@/components/ui/Input";
+import Select from "@/components/ui/Select";
+import Button from "@/components/ui/Button";
+import { Settings as SettingsIcon, Trash2, Edit2 } from "lucide-react";
+
+const CURRENCIES = [
+  { value: "USD", label: "USD ($)" },
+  { value: "EUR", label: "EUR (€)" },
+  { value: "GBP", label: "GBP (£)" },
+  { value: "JPY", label: "JPY (¥)" },
+  { value: "CNY", label: "CNY (¥)" },
+  { value: "INR", label: "INR (₹)" },
+];
+
+export default function SettingsPage() {
+  const router = useRouter();
+  const {
+    user,
+    homeCurrency,
+    incomeSources,
+    expenseCategories,
+    setUser,
+    setIncomeSources,
+    setExpenseCategories,
+    setHomeCurrency,
+    setLoading,
+  } = useStore();
+
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [editingSource, setEditingSource] = useState<IncomeSource | null>(null);
+  const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
+  const [name, setName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadUserAndData();
+  }, []);
+
+  const loadUserAndData = async () => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      setUser(user);
+
+      // Load income sources
+      const { data: sourcesData } = await supabase
+        .from("income_sources")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
+
+      if (sourcesData) {
+        setIncomeSources(sourcesData);
+      }
+
+      // Load expense categories
+      const { data: categoriesData } = await supabase
+        .from("expense_categories")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
+
+      if (categoriesData) {
+        setExpenseCategories(categoriesData);
+      }
+
+      // Load settings
+      const { data: settingsData } = await supabase
+        .from("user_settings")
+        .select("*")
+        .eq("user_id", user.id)
+        .single();
+
+      if (settingsData) {
+        setHomeCurrency(settingsData.home_currency || "USD");
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCurrencyChange = async (currency: string) => {
+    try {
+      setHomeCurrency(currency);
+
+      const { error } = await supabase
+        .from("user_settings")
+        .upsert({
+          user_id: user?.id,
+          home_currency: currency,
+        });
+
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("Error updating currency:", err);
+    }
+  };
+
+  const handleSaveSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      if (!name.trim()) {
+        setError("Please enter a valid name");
+        return;
+      }
+
+      if (editingSource) {
+        const { error } = await supabase
+          .from("income_sources")
+          .update({ name: name.trim() })
+          .eq("id", editingSource.id);
+
+        if (error) throw error;
+
+        setIncomeSources(
+          incomeSources.map((s) => (s.id === editingSource.id ? { ...s, name: name.trim() } : s))
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("income_sources")
+          .insert({ name: name.trim(), user_id: user?.id })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setIncomeSources([...incomeSources, data]);
+      }
+
+      setName("");
+      setEditingSource(null);
+      setIsSourceModalOpen(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to save income source");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteSource = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this income source?")) return;
+
+    try {
+      const { error } = await supabase.from("income_sources").delete().eq("id", id);
+
+      if (error) throw error;
+
+      setIncomeSources(incomeSources.filter((s) => s.id !== id));
+    } catch (err: any) {
+      console.error("Error deleting income source:", err);
+    }
+  };
+
+  const handleEditSource = (source: IncomeSource) => {
+    setEditingSource(source);
+    setName(source.name);
+    setIsSourceModalOpen(true);
+  };
+
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      if (!name.trim()) {
+        setError("Please enter a valid name");
+        return;
+      }
+
+      if (editingCategory) {
+        const { error } = await supabase
+          .from("expense_categories")
+          .update({ name: name.trim() })
+          .eq("id", editingCategory.id);
+
+        if (error) throw error;
+
+        setExpenseCategories(
+          expenseCategories.map((c) =>
+            c.id === editingCategory.id ? { ...c, name: name.trim() } : c
+          )
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("expense_categories")
+          .insert({ name: name.trim(), user_id: user?.id })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setExpenseCategories([...expenseCategories, data]);
+      }
+
+      setName("");
+      setEditingCategory(null);
+      setIsCategoryModalOpen(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to save expense category");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this category?")) return;
+
+    try {
+      const { error } = await supabase.from("expense_categories").delete().eq("id", id);
+
+      if (error) throw error;
+
+      setExpenseCategories(expenseCategories.filter((c) => c.id !== id));
+    } catch (err: any) {
+      console.error("Error deleting category:", err);
+    }
+  };
+
+  const handleEditCategory = (category: ExpenseCategory) => {
+    setEditingCategory(category);
+    setName(category.name);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setName("");
+    setEditingSource(null);
+    setEditingCategory(null);
+    setIsSourceModalOpen(false);
+    setIsCategoryModalOpen(false);
+  };
+
+  return (
+    <div className="min-h-screen p-4 pb-24">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-1 flex items-center gap-3">
+            <SettingsIcon size={32} />
+            Settings
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Manage your preferences and categories
+          </p>
+        </div>
+
+        {/* Home Currency */}
+        <Card className="mb-6">
+          <CardHeader title="Home Currency" subtitle="Default currency for conversions" />
+          <CardContent>
+            <Select
+              options={CURRENCIES}
+              value={homeCurrency}
+              onChange={(e) => handleCurrencyChange(e.target.value)}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Income Sources */}
+        <Card className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Income Sources
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage your income categories
+              </p>
+            </div>
+            <Button onClick={() => setIsSourceModalOpen(true)} size="sm">
+              Add Source
+            </Button>
+          </div>
+          <CardContent>
+            {incomeSources.length === 0 ? (
+              <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                No income sources yet
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {incomeSources.map((source) => (
+                  <div
+                    key={source.id}
+                    className="flex items-center justify-between p-4 rounded-2xl glass-hover"
+                  >
+                    <span className="font-medium text-gray-900 dark:text-white">{source.name}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEditSource(source)}
+                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <Edit2 size={16} className="text-gray-600 dark:text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSource(source.id)}
+                        className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                      >
+                        <Trash2 size={16} className="text-red-600 dark:text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Expense Categories */}
+        <Card className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Expense Categories
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage your spending categories
+              </p>
+            </div>
+            <Button onClick={() => setIsCategoryModalOpen(true)} size="sm">
+              Add Category
+            </Button>
+          </div>
+          <CardContent>
+            {expenseCategories.length === 0 ? (
+              <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                No categories yet
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {expenseCategories.map((category) => (
+                  <div
+                    key={category.id}
+                    className="flex items-center justify-between p-4 rounded-2xl glass-hover"
+                  >
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {category.name}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEditCategory(category)}
+                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <Edit2 size={16} className="text-gray-600 dark:text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCategory(category.id)}
+                        className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                      >
+                        <Trash2 size={16} className="text-red-600 dark:text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Add/Edit Income Source Modal */}
+        <Modal
+          isOpen={isSourceModalOpen}
+          onClose={handleModalClose}
+          title={editingSource ? "Edit Income Source" : "Add Income Source"}
+        >
+          <form onSubmit={handleSaveSource} className="space-y-4">
+            <Input
+              type="text"
+              label="Name"
+              placeholder="e.g., Salary, Freelance"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+            <Button type="submit" className="w-full" isLoading={isSubmitting}>
+              {editingSource ? "Update" : "Add"} Source
+            </Button>
+          </form>
+        </Modal>
+
+        {/* Add/Edit Expense Category Modal */}
+        <Modal
+          isOpen={isCategoryModalOpen}
+          onClose={handleModalClose}
+          title={editingCategory ? "Edit Expense Category" : "Add Expense Category"}
+        >
+          <form onSubmit={handleSaveCategory} className="space-y-4">
+            <Input
+              type="text"
+              label="Name"
+              placeholder="e.g., Food, Transport, Bills"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+            <Button type="submit" className="w-full" isLoading={isSubmitting}>
+              {editingCategory ? "Update" : "Add"} Category
+            </Button>
+          </form>
+        </Modal>
+      </div>
+    </div>
+  );
+}
+
