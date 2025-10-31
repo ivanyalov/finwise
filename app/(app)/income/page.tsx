@@ -35,9 +35,9 @@ export default function IncomePage() {
     transactions,
     incomeSources,
     setUser,
-    setTransactions,
     setIncomeSources,
     setLoading,
+    addTransaction,
   } = useStore();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -63,63 +63,12 @@ export default function IncomePage() {
     filterTransactions();
   }, [currentMonth, selectedSource, selectedCurrency, transactions]);
 
-  const loadUserAndData = async () => {
-    setLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-
-      setUser(user);
-
-      // Load transactions
-      const { data: transactionsData } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("type", "income")
-        .order("date", { ascending: false })
-        .order("created_at", { ascending: false });
-
-      if (transactionsData) {
-        setTransactions(transactionsData);
-      }
-
-      // Load income sources
-      const { data: sourcesData } = await supabase
-        .from("income_sources")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("name");
-
-      if (sourcesData) {
-        setIncomeSources(sourcesData);
-      }
-
-      // Load settings
-      const { data: settingsData } = await supabase
-        .from("user_settings")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
-
-      if (settingsData) {
-        useStore.setState({ homeCurrency: settingsData.home_currency || "USD" });
-      }
-    } catch (error) {
-      console.error("Error loading data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const filterTransactions = () => {
     const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999); // End of day
 
-    let filtered = transactions.filter((t) => {
+    let filtered = transactions.filter((t) => t.type === "income").filter((t) => {
       const transactionDate = new Date(t.date);
       return transactionDate >= monthStart && transactionDate <= monthEnd;
     });
@@ -132,7 +81,71 @@ export default function IncomePage() {
       filtered = filtered.filter((t) => t.currency === selectedCurrency);
     }
 
+    console.log("Filtering income:", {
+      totalTransactions: transactions.length,
+      incomeTransactions: transactions.filter((t) => t.type === "income").length,
+      filteredCount: filtered.length,
+      monthStart: monthStart.toISOString(),
+      monthEnd: monthEnd.toISOString(),
+      currentMonth: currentMonth.toISOString(),
+    });
+
     setFilteredTransactions(filtered);
+  };
+
+  const loadUserAndData = async () => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      setUser(user);
+
+      // Load all transactions if store is empty
+      if (transactions.length === 0) {
+        const { data: transactionsData } = await supabase
+          .from("transactions")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("date", { ascending: false })
+          .order("created_at", { ascending: false });
+
+        if (transactionsData) {
+          useStore.setState({ transactions: transactionsData });
+        }
+      }
+
+      // Only load income sources if not already loaded
+      if (incomeSources.length === 0) {
+        const { data: sourcesData } = await supabase
+          .from("income_sources")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("name");
+
+        if (sourcesData) {
+          setIncomeSources(sourcesData);
+        }
+      }
+
+      // Load settings
+      const { data: settingsData } = await supabase
+        .from("user_settings")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (settingsData) {
+        useStore.setState({ homeCurrency: settingsData.home_currency || "USD" });
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -165,7 +178,7 @@ export default function IncomePage() {
       }
 
       // Create transaction
-      const { error: transactionError } = await supabase
+      const { data: newTransaction, error: transactionError } = await supabase
         .from("transactions")
         .insert({
           type: "income",
@@ -175,20 +188,17 @@ export default function IncomePage() {
           source: sourceId,
           notes: notes || null,
           user_id: user?.id,
-        });
+        })
+        .select()
+        .single();
 
       if (transactionError) throw transactionError;
 
-      // Reload transactions
-      const { data: updatedTransactions } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq("user_id", user?.id)
-        .eq("type", "income")
-        .order("date", { ascending: false });
-
-      if (updatedTransactions) {
-        setTransactions(updatedTransactions);
+      // Add to store
+      if (newTransaction) {
+        console.log("Adding new income to store:", newTransaction);
+        addTransaction(newTransaction);
+        console.log("Transactions after add:", transactions.length);
       }
 
       // Reset form
@@ -326,31 +336,35 @@ export default function IncomePage() {
               </p>
             ) : (
               <div className="space-y-3">
-                {filteredTransactions.map((transaction) => (
-                  <div
-                    key={transaction.id}
-                    className="flex items-center justify-between p-4 rounded-2xl glass-hover"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-green-100 dark:bg-green-900/30">
-                        <TrendingUp className="text-green-600 dark:text-green-400" size={20} />
+                {filteredTransactions.map((transaction) => {
+                  const sourceName = incomeSources.find((s) => s.id === transaction.source)?.name || transaction.source || "Income";
+                  
+                  return (
+                    <div
+                      key={transaction.id}
+                      className="flex items-center justify-between p-4 rounded-2xl glass-hover"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-green-100 dark:bg-green-900/30">
+                          <TrendingUp className="text-green-600 dark:text-green-400" size={20} />
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {sourceName}
+                          </p>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            {formatDate(transaction.date)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
-                          {transaction.source || "Income"}
-                        </p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          {formatDate(transaction.date)}
+                      <div className="text-right">
+                        <p className="font-semibold text-green-600 dark:text-green-400">
+                          +{formatCurrency(transaction.amount, transaction.currency)}
                         </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-green-600 dark:text-green-400">
-                        +{formatCurrency(transaction.amount, transaction.currency)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

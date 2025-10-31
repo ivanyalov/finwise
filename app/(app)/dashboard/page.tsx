@@ -23,8 +23,12 @@ export default function DashboardPage() {
     user,
     homeCurrency,
     transactions,
+    incomeSources,
+    expenseCategories,
     setUser,
     setTransactions,
+    setIncomeSources,
+    setExpenseCategories,
     setLoading,
     getCurrentMonthIncome,
     getCurrentMonthExpenses,
@@ -70,12 +74,34 @@ export default function DashboardPage() {
         setTransactions(transactionsData);
       }
 
+      // Load income sources
+      const { data: sourcesData } = await supabase
+        .from("income_sources")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
+
+      if (sourcesData) {
+        setIncomeSources(sourcesData);
+      }
+
+      // Load expense categories
+      const { data: categoriesData } = await supabase
+        .from("expense_categories")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
+
+      if (categoriesData) {
+        setExpenseCategories(categoriesData);
+      }
+
       // Load settings
       const { data: settingsData } = await supabase
         .from("user_settings")
         .select("*")
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
       if (settingsData) {
         useStore.setState({ homeCurrency: settingsData.home_currency || "USD" });
@@ -290,7 +316,9 @@ export default function DashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium text-gray-900 dark:text-white">
-                            {transaction.source || transaction.category || "Transaction"}
+                            {transaction.type === "income"
+                              ? incomeSources.find((s) => s.id === transaction.source)?.name || transaction.source || "Income"
+                              : expenseCategories.find((c) => c.id === transaction.category)?.name || transaction.category || "Expense"}
                           </p>
                           <p className="text-sm text-gray-500 dark:text-gray-400">
                             {formatDate(transaction.date)}

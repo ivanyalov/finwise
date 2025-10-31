@@ -29,10 +29,10 @@ export default function SavingsPage() {
     homeCurrency,
     transactions,
     setUser,
-    setTransactions,
     setLoading,
     getTotalSavings,
     settings,
+    addTransaction,
   } = useStore();
 
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
@@ -69,16 +69,18 @@ export default function SavingsPage() {
 
       setUser(user);
 
-      // Load transactions
-      const { data: transactionsData } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("date", { ascending: false })
-        .order("created_at", { ascending: false });
+      // Load all transactions if store is empty
+      if (transactions.length === 0) {
+        const { data: transactionsData } = await supabase
+          .from("transactions")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("date", { ascending: false })
+          .order("created_at", { ascending: false });
 
-      if (transactionsData) {
-        setTransactions(transactionsData);
+        if (transactionsData) {
+          useStore.setState({ transactions: transactionsData });
+        }
       }
 
       // Load settings
@@ -86,7 +88,7 @@ export default function SavingsPage() {
         .from("user_settings")
         .select("*")
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
       if (settingsData) {
         useStore.setState({
@@ -112,7 +114,7 @@ export default function SavingsPage() {
         return;
       }
 
-      const { error: transactionError } = await supabase
+      const { data: newTransaction, error: transactionError } = await supabase
         .from("transactions")
         .insert({
           type: "savings_transfer",
@@ -122,19 +124,15 @@ export default function SavingsPage() {
           transfer_type: transferType === "to" ? "to_savings" : "from_savings",
           notes: notes || null,
           user_id: user?.id,
-        });
+        })
+        .select()
+        .single();
 
       if (transactionError) throw transactionError;
 
-      // Reload transactions
-      const { data: updatedTransactions } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq("user_id", user?.id)
-        .order("date", { ascending: false });
-
-      if (updatedTransactions) {
-        setTransactions(updatedTransactions);
+      // Add to store
+      if (newTransaction) {
+        addTransaction(newTransaction);
       }
 
       // Reset form and close modal

@@ -20,6 +20,7 @@ interface StoreState {
   setExpenseCategories: (categories: ExpenseCategory[]) => void;
   setSettings: (settings: UserSettings) => void;
   setLoading: (loading: boolean) => void;
+  addTransaction: (transaction: Transaction) => void;
 
   // Computed values
   getTransactionsByType: (type: string) => Transaction[];
@@ -45,6 +46,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setExpenseCategories: (categories) => set({ expenseCategories: categories }),
   setSettings: (settings) => set({ settings, homeCurrency: settings.home_currency || "USD" }),
   setLoading: (loading) => set({ isLoading: loading }),
+  addTransaction: (transaction) => set((state) => ({ transactions: [transaction, ...state.transactions] })),
 
   getTransactionsByType: (type) => {
     return get().transactions.filter((t) => t.type === type);

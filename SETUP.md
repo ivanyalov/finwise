@@ -38,6 +38,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 
 ```bash
 npm run dev
+npm run build
 ```
 
 Visit http://localhost:3000

@@ -35,6 +35,7 @@ export default function SignupPage() {
     try {
       const { error } = await supabase.auth.signUp({
         email,
+        
         password,
       });
 
