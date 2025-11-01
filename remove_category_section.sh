@@ -1,3 +1,10 @@
+#!/bin/bash
+
+# Remove category management code from Settings page
+# This script removes the handleSaveCategory, handleDeleteCategory, handleEditCategory functions
+# and the Expense Categories card and modal
+
+cat > app/\(app\)/settings/page.tsx << 'EOF'
 "use client";
 
 import { useEffect, useState } from "react";
@@ -466,3 +473,6 @@ export default function SettingsPage() {
     </div>
   );
 }
+EOF
+
+echo "✅ Settings page updated - category management removed"

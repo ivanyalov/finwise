@@ -39,6 +39,10 @@ export type UserSettings = {
   home_currency: string;
   emergency_fund_goal?: number;
   emergency_fund_currency?: string;
+  theme?: "light" | "dark";
+  budget_enabled?: boolean;
+  monthly_budget_amount?: number;
+  budget_currency?: string;
 };
 
 export type ChartData = {

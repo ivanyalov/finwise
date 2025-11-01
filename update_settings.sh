@@ -1,3 +1,19 @@
+#!/bin/bash
+
+# Script to update Settings page with Budget Tracking feature
+# This adds the budget tracking code to your Settings page automatically
+
+SETTINGS_FILE="app/(app)/settings/page.tsx"
+BACKUP_FILE="app/(app)/settings/page.tsx.manual_backup"
+
+echo "🔧 Updating Settings page with Budget Tracking..."
+
+# Create backup
+cp "$SETTINGS_FILE" "$BACKUP_FILE"
+echo "✅ Backup created: $BACKUP_FILE"
+
+# Create the updated file
+cat > "$SETTINGS_FILE" << 'EOF'
 "use client";
 
 import { useEffect, useState } from "react";
@@ -5,7 +21,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store/useStore";
 import { useTheme } from "@/lib/hooks/useTheme";
-import { IncomeSource } from "@/lib/types";
+import { IncomeSource, ExpenseCategory } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
@@ -33,8 +49,10 @@ export default function SettingsPage() {
     user,
     homeCurrency,
     incomeSources,
+    expenseCategories,
     setUser,
     setIncomeSources,
+    setExpenseCategories,
     setHomeCurrency,
     setTheme: setStoreTheme,
     setLoading,
@@ -43,7 +61,9 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
 
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<IncomeSource | null>(null);
+  const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -79,6 +99,17 @@ export default function SettingsPage() {
         setIncomeSources(sourcesData);
       }
 
+      // Load expense categories
+      const { data: categoriesData } = await supabase
+        .from("expense_categories")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
+
+      if (categoriesData) {
+        setExpenseCategories(categoriesData);
+      }
+
       // Load settings
       const { data: settingsData } = await supabase
         .from("user_settings")
@@ -91,6 +122,7 @@ export default function SettingsPage() {
         if (settingsData.theme) {
           setStoreTheme(settingsData.theme as "light" | "dark");
         }
+        // Load budget settings
         setBudgetEnabled(settingsData.budget_enabled || false);
         setBudgetAmount(settingsData.monthly_budget_amount?.toString() || "");
         setBudgetCurrency(settingsData.budget_currency || settingsData.home_currency || "USD");
@@ -271,6 +303,72 @@ export default function SettingsPage() {
     setIsSourceModalOpen(true);
   };
 
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      if (!name.trim()) {
+        setError("Please enter a valid name");
+        return;
+      }
+
+      if (editingCategory) {
+        const { error } = await supabase
+          .from("expense_categories")
+          .update({ name: name.trim() })
+          .eq("id", editingCategory.id);
+
+        if (error) throw error;
+
+        setExpenseCategories(
+          expenseCategories.map((c) =>
+            c.id === editingCategory.id ? { ...c, name: name.trim() } : c
+          )
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("expense_categories")
+          .insert({ name: name.trim(), user_id: user?.id })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        setExpenseCategories([...expenseCategories, data]);
+      }
+
+      setName("");
+      setEditingCategory(null);
+      setIsCategoryModalOpen(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to save expense category");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this category?")) return;
+
+    try {
+      const { error } = await supabase.from("expense_categories").delete().eq("id", id);
+
+      if (error) throw error;
+
+      setExpenseCategories(expenseCategories.filter((c) => c.id !== id));
+    } catch (err: any) {
+      console.error("Error deleting category:", err);
+    }
+  };
+
+  const handleEditCategory = (category: ExpenseCategory) => {
+    setEditingCategory(category);
+    setName(category.name);
+    setIsCategoryModalOpen(true);
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
@@ -279,7 +377,9 @@ export default function SettingsPage() {
   const handleModalClose = () => {
     setName("");
     setEditingSource(null);
+    setEditingCategory(null);
     setIsSourceModalOpen(false);
+    setIsCategoryModalOpen(false);
   };
 
   return (
@@ -415,6 +515,57 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Expense Categories */}
+        <Card className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Expense Categories
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Manage your spending categories
+              </p>
+            </div>
+            <Button onClick={() => setIsCategoryModalOpen(true)} size="sm">
+              Add Category
+            </Button>
+          </div>
+          <CardContent>
+            {expenseCategories.length === 0 ? (
+              <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                No categories yet
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {expenseCategories.map((category) => (
+                  <div
+                    key={category.id}
+                    className="flex items-center justify-between p-4 rounded-2xl glass-hover"
+                  >
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {category.name}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEditCategory(category)}
+                        className="p-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <Edit2 size={16} className="text-indigo-600 dark:text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCategory(category.id)}
+                        className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                      >
+                        <Trash2 size={16} className="text-red-600 dark:text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Logout Section */}
         <Card className="mb-6">
           <CardContent className="p-6">
@@ -462,7 +613,39 @@ export default function SettingsPage() {
             </Button>
           </form>
         </Modal>
+
+        {/* Add/Edit Expense Category Modal */}
+        <Modal
+          isOpen={isCategoryModalOpen}
+          onClose={handleModalClose}
+          title={editingCategory ? "Edit Expense Category" : "Add Expense Category"}
+        >
+          <form onSubmit={handleSaveCategory} className="space-y-4">
+            <Input
+              type="text"
+              label="Name"
+              placeholder="e.g., Food, Transport, Bills"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+            <Button type="submit" className="w-full" isLoading={isSubmitting}>
+              {editingCategory ? "Update" : "Add"} Category
+            </Button>
+          </form>
+        </Modal>
       </div>
     </div>
   );
 }
+EOF
+
+echo ""
+echo "✅ Settings page updated successfully!"
+echo ""
+echo "The budget tracking feature has been added to your Settings page."
+echo "A backup of the original file was saved to: $BACKUP_FILE"
+

@@ -12,7 +12,6 @@ import {
   TrendingDown,
   Wallet,
   PiggyBank,
-  LogOut,
   DollarSign,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
@@ -137,10 +136,6 @@ export default function DashboardPage() {
     setPrevMonthExpenses(expenses);
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
 
   const currentIncome = getCurrentMonthIncome();
   const currentExpenses = getCurrentMonthExpenses();
@@ -155,7 +150,7 @@ export default function DashboardPage() {
     <div className="min-h-screen p-4 pb-24">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
               Dashboard
@@ -164,15 +159,6 @@ export default function DashboardPage() {
               Welcome back! Here's your financial overview
             </p>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleLogout}
-            className="flex items-center gap-2"
-          >
-            <LogOut size={18} />
-            Logout
-          </Button>
         </div>
 
         {/* Summary Cards */}

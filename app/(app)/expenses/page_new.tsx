@@ -16,7 +16,7 @@ import {
   getMonthYear,
   calculateConvertedAmount,
 } from "@/lib/utils";
-import { Plus, TrendingDown, ChevronLeft, ChevronRight, ChevronRight as ArrowRight, FolderPlus } from "lucide-react";
+import { Plus, TrendingDown, ChevronLeft, ChevronRight } from "lucide-react";
 
 const CURRENCIES = [
   { value: "USD", label: "USD ($)" },
@@ -67,10 +67,7 @@ export default function ExpensesPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedCurrency, setSelectedCurrency] = useState<string>("all");
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>("categories");
-  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [isCategorySubmitting, setIsCategorySubmitting] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("transactions");
 
   // Budget state
   const [budgetEnabled, setBudgetEnabled] = useState(false);
@@ -193,33 +190,22 @@ export default function ExpensesPage() {
         return;
       }
 
-      // Find existing category by name or create new one
-      const existingCategory = expenseCategories.find(
-        (c) => c.name.toLowerCase() === category.toLowerCase()
-      );
-      
-      let categoryId: string;
-      
-      if (existingCategory) {
-        // Use existing category
-        categoryId = existingCategory.id;
-      } else {
-        // Create new category
+      // Create category if it doesn't exist
+      let categoryId = category;
+      if (!expenseCategories.find((c) => c.id === category)) {
         const { data: newCategory, error: categoryError } = await supabase
           .from("expense_categories")
           .insert({
-            name: category.trim(),
+            name: category,
             user_id: user?.id,
           })
           .select()
           .single();
 
-        if (categoryError || !newCategory) {
-          throw new Error("Failed to create category");
+        if (!categoryError && newCategory) {
+          categoryId = newCategory.id;
+          setExpenseCategories([...expenseCategories, newCategory]);
         }
-        
-        categoryId = newCategory.id;
-        setExpenseCategories([...expenseCategories, newCategory]);
       }
 
       // Create transaction
@@ -326,46 +312,8 @@ export default function ExpensesPage() {
   };
 
   const handleCategoryClick = (categoryId: string) => {
-    // Navigate to category detail page
-    router.push(`/expenses/category/${categoryId}`);
-  };
-
-  const handleAddCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsCategorySubmitting(true);
-
-    try {
-      if (!newCategoryName.trim()) {
-        return;
-      }
-
-      // Check if category already exists
-      const exists = expenseCategories.find(
-        (c) => c.name.toLowerCase() === newCategoryName.trim().toLowerCase()
-      );
-
-      if (exists) {
-        alert("A category with this name already exists");
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("expense_categories")
-        .insert({ name: newCategoryName.trim(), user_id: user?.id })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setExpenseCategories([...expenseCategories, data]);
-      setNewCategoryName("");
-      setIsCategoryModalOpen(false);
-    } catch (err: any) {
-      console.error("Error creating category:", err);
-      alert("Failed to create category");
-    } finally {
-      setIsCategorySubmitting(false);
-    }
+    setViewMode("transactions");
+    setSelectedCategory(categoryId);
   };
 
   return (
@@ -379,16 +327,10 @@ export default function ExpensesPage() {
               Track your spending and categories
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button onClick={() => setIsCategoryModalOpen(true)} variant="secondary" className="flex items-center gap-2">
-              <FolderPlus size={18} />
-              <span className="hidden sm:inline">Add Category</span>
-            </Button>
-            <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
-              <Plus size={18} />
-              Add Expense
-            </Button>
-          </div>
+          <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
+            <Plus size={18} />
+            Add Expense
+          </Button>
         </div>
 
         {/* Budget Card */}
@@ -559,16 +501,13 @@ export default function ExpensesPage() {
                         <span className="font-semibold text-gray-900 dark:text-white">
                           {cat.name}
                         </span>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-lg font-bold text-red-600 dark:text-red-400">
-                              {formatCurrency(cat.amount, homeCurrency)}
-                            </span>
-                            <span className="text-sm text-gray-500 dark:text-gray-400">
-                              ({cat.percentage.toFixed(0)}%)
-                            </span>
-                          </div>
-                          <ArrowRight size={18} className="text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-lg font-bold text-red-600 dark:text-red-400">
+                            {formatCurrency(cat.amount, homeCurrency)}
+                          </span>
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            ({cat.percentage.toFixed(0)}%)
+                          </span>
                         </div>
                       </div>
                       <div className="relative w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -633,31 +572,6 @@ export default function ExpensesPage() {
             </CardContent>
           </Card>
         )}
-
-        {/* Add Category Modal */}
-        <Modal 
-          isOpen={isCategoryModalOpen} 
-          onClose={() => {
-            setIsCategoryModalOpen(false);
-            setNewCategoryName("");
-          }} 
-          title="Add Category"
-        >
-          <form onSubmit={handleAddCategory} className="space-y-4">
-            <Input
-              type="text"
-              label="Category Name"
-              placeholder="e.g., Food, Transport, Bills"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              required
-            />
-
-            <Button type="submit" className="w-full" isLoading={isCategorySubmitting}>
-              Create Category
-            </Button>
-          </form>
-        </Modal>
 
         {/* Add Expense Modal */}
         <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add Expense">

@@ -35,22 +35,13 @@ export default function SignupPage() {
     try {
       const { error } = await supabase.auth.signUp({
         email,
-        
         password,
       });
 
       if (error) throw error;
 
-      // Auto login after signup
-      const { error: loginError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (loginError) throw loginError;
-
-      router.push("/dashboard");
-      router.refresh();
+      // Redirect to email confirmation page
+      router.push(`/confirm-email?email=${encodeURIComponent(email)}`);
     } catch (err: any) {
       setError(err.message || "Failed to create account");
     } finally {

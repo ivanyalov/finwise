@@ -6,6 +6,7 @@ import { calculateConvertedAmount } from "@/lib/utils";
 interface StoreState {
   user: any;
   homeCurrency: string;
+  theme: "light" | "dark";
   transactions: Transaction[];
   incomeSources: IncomeSource[];
   expenseCategories: ExpenseCategory[];
@@ -15,6 +16,7 @@ interface StoreState {
   // Actions
   setUser: (user: any) => void;
   setHomeCurrency: (currency: string) => void;
+  setTheme: (theme: "light" | "dark") => void;
   setTransactions: (transactions: Transaction[]) => void;
   setIncomeSources: (sources: IncomeSource[]) => void;
   setExpenseCategories: (categories: ExpenseCategory[]) => void;
@@ -33,6 +35,7 @@ interface StoreState {
 export const useStore = create<StoreState>((set, get) => ({
   user: null,
   homeCurrency: "USD",
+  theme: "dark",
   transactions: [],
   incomeSources: [],
   expenseCategories: [],
@@ -41,10 +44,22 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setUser: (user) => set({ user }),
   setHomeCurrency: (currency) => set({ homeCurrency: currency }),
+  setTheme: (theme) => {
+    set({ theme });
+    // Apply theme to document
+    if (typeof window !== "undefined") {
+      document.documentElement.classList.remove("light", "dark");
+      document.documentElement.classList.add(theme);
+    }
+  },
   setTransactions: (transactions) => set({ transactions }),
   setIncomeSources: (sources) => set({ incomeSources: sources }),
   setExpenseCategories: (categories) => set({ expenseCategories: categories }),
-  setSettings: (settings) => set({ settings, homeCurrency: settings.home_currency || "USD" }),
+  setSettings: (settings) => set({ 
+    settings, 
+    homeCurrency: settings.home_currency || "USD",
+    theme: settings.theme || "dark"
+  }),
   setLoading: (loading) => set({ isLoading: loading }),
   addTransaction: (transaction) => set((state) => ({ transactions: [transaction, ...state.transactions] })),
 

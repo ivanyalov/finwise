@@ -86,6 +86,7 @@ CREATE TABLE user_settings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
   home_currency TEXT NOT NULL DEFAULT 'USD',
+  theme TEXT DEFAULT 'dark' CHECK (theme IN ('light', 'dark')),
   emergency_fund_goal DECIMAL(10, 2),
   emergency_fund_currency TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

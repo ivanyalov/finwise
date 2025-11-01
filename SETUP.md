@@ -14,6 +14,15 @@ npm install
 3. Go to Settings → API
 4. Copy Project URL and Anon Key
 
+**IMPORTANT: Configure Authentication URLs**
+5. Go to Authentication → URL Configuration
+6. Set **Site URL**: 
+   - Local: `http://localhost:3000`
+   - Production: `https://your-app.vercel.app`
+7. Add **Redirect URLs** (one per line):
+   - `http://localhost:3000/**`
+   - `https://your-app.vercel.app/**`
+
 ### 3. 🗄️ Database Setup
 
 In Supabase SQL Editor, run the complete schema from README.md:
@@ -38,7 +47,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 
 ```bash
 npm run dev
-npm run build
+# npm run build
 ```
 
 Visit http://localhost:3000
@@ -150,6 +159,13 @@ Visit http://localhost:3000
 - Check middleware.ts is present
 - Verify Supabase auth is enabled
 - Clear browser cookies
+
+### Email Confirmation Not Working
+If you get "requested path is invalid" when clicking email links:
+- Go to Supabase → Authentication → URL Configuration
+- Set **Site URL** to your app URL (e.g., `https://your-app.vercel.app`)
+- Add **Redirect URLs**: `https://your-app.vercel.app/**`
+- Make sure the `/app/auth/callback/route.ts` file exists
 
 ## Next Steps for Production
 

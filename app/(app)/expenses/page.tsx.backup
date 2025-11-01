@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store/useStore";
-import { Transaction, IncomeSource } from "@/lib/types";
+import { Transaction, ExpenseCategory } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
@@ -16,7 +16,7 @@ import {
   getMonthYear,
   calculateConvertedAmount,
 } from "@/lib/utils";
-import { Plus, TrendingUp, ChevronLeft, ChevronRight, DollarSign } from "lucide-react";
+import { Plus, TrendingDown, ChevronLeft, ChevronRight } from "lucide-react";
 
 const CURRENCIES = [
   { value: "USD", label: "USD ($)" },
@@ -27,29 +27,29 @@ const CURRENCIES = [
   { value: "INR", label: "INR (₹)" },
 ];
 
-export default function IncomePage() {
+export default function ExpensesPage() {
   const router = useRouter();
   const {
     user,
     homeCurrency,
     transactions,
-    incomeSources,
+    expenseCategories,
     setUser,
-    setIncomeSources,
+    setExpenseCategories,
     setLoading,
     addTransaction,
   } = useStore();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedSource, setSelectedSource] = useState<string>("all");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedCurrency, setSelectedCurrency] = useState<string>("all");
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
 
   // Form state
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
-  const [source, setSource] = useState("");
+  const [category, setCategory] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,29 +61,29 @@ export default function IncomePage() {
 
   useEffect(() => {
     filterTransactions();
-  }, [currentMonth, selectedSource, selectedCurrency, transactions]);
+  }, [currentMonth, selectedCategory, selectedCurrency, transactions]);
 
   const filterTransactions = () => {
     const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
     monthEnd.setHours(23, 59, 59, 999); // End of day
 
-    let filtered = transactions.filter((t) => t.type === "income").filter((t) => {
+    let filtered = transactions.filter((t) => t.type === "expense").filter((t) => {
       const transactionDate = new Date(t.date);
       return transactionDate >= monthStart && transactionDate <= monthEnd;
     });
 
-    if (selectedSource !== "all") {
-      filtered = filtered.filter((t) => t.source === selectedSource);
+    if (selectedCategory !== "all") {
+      filtered = filtered.filter((t) => t.category === selectedCategory);
     }
 
     if (selectedCurrency !== "all") {
       filtered = filtered.filter((t) => t.currency === selectedCurrency);
     }
 
-    console.log("Filtering income:", {
+    console.log("Filtering expenses:", {
       totalTransactions: transactions.length,
-      incomeTransactions: transactions.filter((t) => t.type === "income").length,
+      expenseTransactions: transactions.filter((t) => t.type === "expense").length,
       filteredCount: filtered.length,
       monthStart: monthStart.toISOString(),
       monthEnd: monthEnd.toISOString(),
@@ -118,16 +118,16 @@ export default function IncomePage() {
         }
       }
 
-      // Only load income sources if not already loaded
-      if (incomeSources.length === 0) {
-        const { data: sourcesData } = await supabase
-          .from("income_sources")
+      // Only load expense categories if not already loaded
+      if (expenseCategories.length === 0) {
+        const { data: categoriesData } = await supabase
+          .from("expense_categories")
           .select("*")
           .eq("user_id", user.id)
           .order("name");
 
-        if (sourcesData) {
-          setIncomeSources(sourcesData);
+        if (categoriesData) {
+          setExpenseCategories(categoriesData);
         }
       }
 
@@ -159,21 +159,21 @@ export default function IncomePage() {
         return;
       }
 
-      // Create source if it doesn't exist
-      let sourceId = source;
-      if (!incomeSources.find((s) => s.id === source)) {
-        const { data: newSource, error: sourceError } = await supabase
-          .from("income_sources")
+      // Create category if it doesn't exist
+      let categoryId = category;
+      if (!expenseCategories.find((c) => c.id === category)) {
+        const { data: newCategory, error: categoryError } = await supabase
+          .from("expense_categories")
           .insert({
-            name: source,
+            name: category,
             user_id: user?.id,
           })
           .select()
           .single();
 
-        if (!sourceError && newSource) {
-          sourceId = newSource.id;
-          setIncomeSources([...incomeSources, newSource]);
+        if (!categoryError && newCategory) {
+          categoryId = newCategory.id;
+          setExpenseCategories([...expenseCategories, newCategory]);
         }
       }
 
@@ -181,11 +181,11 @@ export default function IncomePage() {
       const { data: newTransaction, error: transactionError } = await supabase
         .from("transactions")
         .insert({
-          type: "income",
+          type: "expense",
           amount: parseFloat(amount),
           currency,
           date,
-          source: sourceId,
+          category: categoryId,
           notes: notes || null,
           user_id: user?.id,
         })
@@ -196,19 +196,19 @@ export default function IncomePage() {
 
       // Add to store
       if (newTransaction) {
-        console.log("Adding new income to store:", newTransaction);
+        console.log("Adding new transaction to store:", newTransaction);
         addTransaction(newTransaction);
         console.log("Transactions after add:", transactions.length);
       }
 
       // Reset form
       setAmount("");
-      setSource("");
+      setCategory("");
       setDate(new Date().toISOString().split("T")[0]);
       setNotes("");
       setIsModalOpen(false);
     } catch (err: any) {
-      setError(err.message || "Failed to add income");
+      setError(err.message || "Failed to add expense");
     } finally {
       setIsSubmitting(false);
     }
@@ -239,14 +239,14 @@ export default function IncomePage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Income</h1>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Expenses</h1>
             <p className="text-gray-600 dark:text-gray-400 mt-1">
-              Track your earnings and sources
+              Track your spending and categories
             </p>
           </div>
           <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
             <Plus size={18} />
-            Add Income
+            Add Expense
           </Button>
         </div>
 
@@ -274,13 +274,13 @@ export default function IncomePage() {
         {/* Filters */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <Select
-            label="Filter by Source"
+            label="Filter by Category"
             options={[
-              { value: "all", label: "All Sources" },
-              ...incomeSources.map((s) => ({ value: s.id, label: s.name })),
+              { value: "all", label: "All Categories" },
+              ...expenseCategories.map((c) => ({ value: c.id, label: c.name })),
             ]}
-            value={selectedSource}
-            onChange={(e) => setSelectedSource(e.target.value)}
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
           />
           <Select
             label="Filter by Currency"
@@ -304,12 +304,12 @@ export default function IncomePage() {
                   className="flex items-center justify-between p-4 rounded-2xl glass-hover"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-green-100 dark:bg-green-900/30">
-                      <DollarSign className="text-green-600 dark:text-green-400" size={20} />
+                    <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/30">
+                      <TrendingDown className="text-red-600 dark:text-red-400" size={20} />
                     </div>
                     <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
                   </div>
-                  <span className="text-lg font-semibold text-green-600 dark:text-green-400">
+                  <span className="text-lg font-semibold text-red-600 dark:text-red-400">
                     {formatCurrency(amount, currency)}
                   </span>
                 </div>
@@ -332,12 +332,12 @@ export default function IncomePage() {
           <CardContent>
             {filteredTransactions.length === 0 ? (
               <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                No income recorded for this month
+                No expenses recorded for this month
               </p>
             ) : (
               <div className="space-y-3">
                 {filteredTransactions.map((transaction) => {
-                  const sourceName = incomeSources.find((s) => s.id === transaction.source)?.name || transaction.source || "Income";
+                  const categoryName = expenseCategories.find((c) => c.id === transaction.category)?.name || transaction.category || "Expense";
                   
                   return (
                     <div
@@ -345,12 +345,12 @@ export default function IncomePage() {
                       className="flex items-center justify-between p-4 rounded-2xl glass-hover"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-xl bg-green-100 dark:bg-green-900/30">
-                          <TrendingUp className="text-green-600 dark:text-green-400" size={20} />
+                        <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/30">
+                          <TrendingDown className="text-red-600 dark:text-red-400" size={20} />
                         </div>
                         <div>
                           <p className="font-medium text-gray-900 dark:text-white">
-                            {sourceName}
+                            {categoryName}
                           </p>
                           <p className="text-sm text-gray-500 dark:text-gray-400">
                             {formatDate(transaction.date)}
@@ -358,8 +358,8 @@ export default function IncomePage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold text-green-600 dark:text-green-400">
-                          +{formatCurrency(transaction.amount, transaction.currency)}
+                        <p className="font-semibold text-red-600 dark:text-red-400">
+                          -{formatCurrency(transaction.amount, transaction.currency)}
                         </p>
                       </div>
                     </div>
@@ -370,8 +370,8 @@ export default function IncomePage() {
           </CardContent>
         </Card>
 
-        {/* Add Income Modal */}
-        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add Income">
+        {/* Add Expense Modal */}
+        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add Expense">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               type="number"
@@ -394,10 +394,10 @@ export default function IncomePage() {
 
             <Input
               type="text"
-              label="Source"
-              placeholder="e.g., Salary, Freelance, Business"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
+              label="Category"
+              placeholder="e.g., Food, Transport, Bills"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
               required
             />
 
@@ -420,7 +420,7 @@ export default function IncomePage() {
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
             <Button type="submit" className="w-full" isLoading={isSubmitting}>
-              Add Income
+              Add Expense
             </Button>
           </form>
         </Modal>
