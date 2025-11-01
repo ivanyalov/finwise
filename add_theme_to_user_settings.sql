@@ -17,3 +17,4 @@ WHERE table_name = 'user_settings'
   AND column_name = 'theme';
 
 
+
