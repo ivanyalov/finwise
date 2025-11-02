@@ -16,7 +16,7 @@ import {
   getMonthYear,
   calculateConvertedAmount,
 } from "@/lib/utils";
-import { Plus, TrendingDown, ChevronLeft, ChevronRight, ChevronRight as ArrowRight, FolderPlus } from "lucide-react";
+import { Plus, TrendingDown, ChevronLeft, ChevronRight, ChevronRight as ArrowRight, ChevronDown, X, FolderPlus, Menu, Layers, Receipt, Calendar, DollarSign } from "lucide-react";
 
 const CURRENCIES = [
   { value: "USD", label: "USD ($)" },
@@ -71,6 +71,9 @@ export default function ExpensesPage() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [isCategorySubmitting, setIsCategorySubmitting] = useState(false);
+  const [isBudgetAnalyticsOpen, setIsBudgetAnalyticsOpen] = useState(false);
+  const [isTotalsDropdownOpen, setIsTotalsDropdownOpen] = useState(false);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
   // Budget state
   const [budgetEnabled, setBudgetEnabled] = useState(false);
@@ -92,16 +95,28 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     filterTransactions();
-  }, [currentMonth, selectedCategory, selectedCurrency, transactions]);
+  }, [currentMonth, selectedCategory, selectedCurrency, transactions, expenseCategories]);
+
+  // Reset currency filter when month changes
+  useEffect(() => {
+    setSelectedCurrency("all");
+    setIsTotalsDropdownOpen(false);
+  }, [currentMonth]);
 
   const filterTransactions = () => {
     const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
     monthEnd.setHours(23, 59, 59, 999); // End of day
 
+    // Get valid category IDs
+    const validCategoryIds = new Set(expenseCategories.map(c => c.id));
+
     let filtered = transactions.filter((t) => t.type === "expense").filter((t) => {
       const transactionDate = new Date(t.date);
-      return transactionDate >= monthStart && transactionDate <= monthEnd;
+      const isInDateRange = transactionDate >= monthStart && transactionDate <= monthEnd;
+      // Only include transactions whose category still exists
+      const hasValidCategory = !t.category || validCategoryIds.has(t.category);
+      return isInDateRange && hasValidCategory;
     });
 
     if (selectedCategory !== "all") {
@@ -135,31 +150,33 @@ export default function ExpensesPage() {
 
       setUser(user);
 
-      // Load all transactions if store is empty
-      if (transactions.length === 0) {
-        const { data: transactionsData } = await supabase
-          .from("transactions")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("date", { ascending: false })
-          .order("created_at", { ascending: false });
+      // Always load fresh data from database
+      const { data: transactionsData, error: transError } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
 
-        if (transactionsData) {
-          useStore.setState({ transactions: transactionsData });
-        }
+      if (transError) {
+        console.error("Error loading transactions:", transError);
+      } else if (transactionsData) {
+        console.log(`Loaded ${transactionsData.length} transactions`);
+        useStore.setState({ transactions: transactionsData });
       }
 
-      // Only load expense categories if not already loaded
-      if (expenseCategories.length === 0) {
-        const { data: categoriesData } = await supabase
-          .from("expense_categories")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("name");
+      // Always load fresh expense categories
+      const { data: categoriesData, error: catError } = await supabase
+        .from("expense_categories")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
 
-        if (categoriesData) {
-          setExpenseCategories(categoriesData);
-        }
+      if (catError) {
+        console.error("Error loading categories:", catError);
+      } else if (categoriesData) {
+        console.log(`Loaded ${categoriesData.length} expense categories`);
+        setExpenseCategories(categoriesData);
       }
 
       // Load settings including budget
@@ -175,10 +192,63 @@ export default function ExpensesPage() {
         setBudgetAmount(settingsData.monthly_budget_amount || 0);
         setBudgetCurrency(settingsData.budget_currency || settingsData.home_currency || "USD");
       }
+
+      // Clean up orphaned transactions (transactions whose category no longer exists)
+      await cleanupOrphanedTransactions(user.id);
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const cleanupOrphanedTransactions = async (userId: string) => {
+    try {
+      // Get all expense categories for this user
+      const { data: categories } = await supabase
+        .from("expense_categories")
+        .select("id")
+        .eq("user_id", userId);
+
+      if (!categories) return;
+
+      const validCategoryIds = categories.map(c => c.id);
+
+      // Get all expense transactions
+      const { data: expenseTransactions } = await supabase
+        .from("transactions")
+        .select("id, category")
+        .eq("user_id", userId)
+        .eq("type", "expense")
+        .not("category", "is", null);
+
+      if (!expenseTransactions) return;
+
+      // Find orphaned transactions (transactions with categories that don't exist)
+      const orphanedIds = expenseTransactions
+        .filter(t => !validCategoryIds.includes(t.category))
+        .map(t => t.id);
+
+      if (orphanedIds.length > 0) {
+        console.log(`Cleaning up ${orphanedIds.length} orphaned transactions`);
+        
+        // Delete orphaned transactions from database
+        const { error } = await supabase
+          .from("transactions")
+          .delete()
+          .in("id", orphanedIds);
+
+        if (error) {
+          console.error("Error cleaning up orphaned transactions:", error);
+        } else {
+          // Update local state to remove orphaned transactions
+          useStore.setState({
+            transactions: transactions.filter(t => !orphanedIds.includes(t.id))
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error in cleanup:", error);
     }
   };
 
@@ -320,15 +390,207 @@ export default function ExpensesPage() {
   };
 
   const getBudgetBarColor = () => {
-    if (budgetPercentage >= 100) return "bg-red-500";
-    if (budgetPercentage >= 80) return "bg-amber-500";
+    const today = new Date();
+    const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+    
+    // Check if we're viewing the current month
+    const isCurrentMonth = 
+      today.getFullYear() === currentMonth.getFullYear() && 
+      today.getMonth() === currentMonth.getMonth();
+    
+    // For past/future months, just show color based on total percentage
+    if (!isCurrentMonth) {
+      if (budgetPercentage >= 100) return "bg-red-500";
+      if (budgetPercentage >= 80) return "bg-amber-500";
+      return "bg-green-500";
+    }
+    
+    // For current month, calculate expected spending based on day
+    const currentDay = today.getDate();
+    const expectedPercentage = (currentDay / totalDays) * 100;
+    
+    // Compare actual spending to expected spending
+    const difference = budgetPercentage - expectedPercentage;
+    
+    // Red: spending significantly more than expected (20%+ ahead of pace)
+    if (difference > 20 || budgetPercentage >= 100) return "bg-red-500";
+    
+    // Yellow: spending moderately more than expected (5-20% ahead of pace)
+    if (difference > 5) return "bg-amber-500";
+    
+    // Green: on track or under budget
     return "bg-green-500";
+  };
+
+  // Calculate day progress for budget tracking
+  const getDayProgress = () => {
+    const today = new Date();
+    const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+    
+    // Check if we're viewing the current month
+    const isCurrentMonth = 
+      today.getFullYear() === currentMonth.getFullYear() && 
+      today.getMonth() === currentMonth.getMonth();
+    
+    // Only show day progress for current month
+    if (!isCurrentMonth) {
+      return null;
+    }
+    
+    const currentDay = today.getDate();
+    const dayPercentage = (currentDay / totalDays) * 100;
+    
+    return {
+      currentDay,
+      totalDays,
+      dayPercentage,
+      isOnTrack: budgetPercentage <= dayPercentage,
+      difference: budgetPercentage - dayPercentage,
+    };
+  };
+
+  const dayProgress = budgetEnabled && budgetAmount > 0 ? getDayProgress() : null;
+
+  const getProgressStatus = () => {
+    if (!dayProgress) return "";
+    
+    if (budgetPercentage >= 100) {
+      return "Budget exceeded";
+    }
+    
+    const diff = Math.abs(dayProgress.difference);
+    if (dayProgress.isOnTrack) {
+      if (diff < 5) {
+        return "On track";
+      }
+      return "Under budget";
+    } else {
+      return "Over pace";
+    }
+  };
+
+  const getProgressStatusColor = () => {
+    if (!dayProgress) return "";
+    
+    if (budgetPercentage >= 100) {
+      return "text-red-600 dark:text-red-400";
+    }
+    
+    const diff = Math.abs(dayProgress.difference);
+    if (dayProgress.isOnTrack) {
+      return "text-green-600 dark:text-green-400";
+    } else {
+      if (diff > 20) {
+        return "text-red-600 dark:text-red-400";
+      }
+      return "text-amber-600 dark:text-amber-400";
+    }
   };
 
   const handleCategoryClick = (categoryId: string) => {
     // Navigate to category detail page
     router.push(`/expenses/category/${categoryId}`);
   };
+
+  // Calculate spending analytics and recommendations
+  const getBudgetAnalytics = () => {
+    const today = new Date();
+    const isCurrentMonth = 
+      today.getFullYear() === currentMonth.getFullYear() && 
+      today.getMonth() === currentMonth.getMonth();
+    
+    const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+    const currentDay = isCurrentMonth ? today.getDate() : totalDays;
+    const daysRemaining = isCurrentMonth ? totalDays - currentDay : 0;
+    
+    // Get expenses from the selected month
+    const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const monthEnd = isCurrentMonth 
+      ? today 
+      : new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+    
+    const monthExpenses = transactions.filter((t) => {
+      const transactionDate = new Date(t.date);
+      return t.type === "expense" && transactionDate >= monthStart && transactionDate <= monthEnd;
+    });
+
+    // Calculate daily spending for the past days
+    const spendingByDay: Record<number, number> = {};
+    monthExpenses.forEach((t) => {
+      const day = new Date(t.date).getDate();
+      const convertedAmount = calculateConvertedAmount(t.amount, t.currency, budgetCurrency);
+      spendingByDay[day] = (spendingByDay[day] || 0) + convertedAmount;
+    });
+
+    // Calculate average daily spending (only for days that have passed)
+    const pastDays = Math.min(currentDay, 7); // Look at last 7 days or fewer
+    let recentTotal = 0;
+    let recentDaysCount = 0;
+    for (let i = Math.max(1, currentDay - pastDays + 1); i <= currentDay; i++) {
+      if (spendingByDay[i]) {
+        recentTotal += spendingByDay[i];
+        recentDaysCount++;
+      }
+    }
+    const avgDailySpending = recentDaysCount > 0 ? recentTotal / recentDaysCount : budgetSpent / currentDay;
+
+    // Calculate what daily spending should be
+    const idealDailySpending = budgetAmount / totalDays;
+    const spendingDifference = avgDailySpending - idealDailySpending;
+
+    // Calculate recommendations for different scenarios
+    const recommendations = [];
+    
+    if (daysRemaining > 0) {
+      const remainingBudget = budgetAmount - budgetSpent;
+      
+      // Option 1: Get back on track by end of month
+      const endOfMonthDaily = remainingBudget / daysRemaining;
+      recommendations.push({
+        days: daysRemaining,
+        label: "by end of month",
+        dailyAmount: endOfMonthDaily,
+        totalAmount: remainingBudget,
+      });
+
+      // Option 2: Get back on track in 3 days (if applicable)
+      if (daysRemaining >= 3) {
+        const in3Days = Math.min(3, daysRemaining);
+        const cushion = (remainingBudget - idealDailySpending * in3Days) / Math.max(1, daysRemaining - in3Days);
+        recommendations.push({
+          days: in3Days,
+          label: "in next 3 days",
+          dailyAmount: cushion,
+          totalAmount: cushion * in3Days,
+        });
+      }
+
+      // Option 3: Get back on track in 5 days (if applicable)
+      if (daysRemaining >= 5) {
+        const in5Days = Math.min(5, daysRemaining);
+        const cushion5 = (remainingBudget - idealDailySpending * in5Days) / Math.max(1, daysRemaining - in5Days);
+        recommendations.push({
+          days: in5Days,
+          label: "in next 5 days",
+          dailyAmount: cushion5,
+          totalAmount: cushion5 * in5Days,
+        });
+      }
+    }
+
+    return {
+      avgDailySpending,
+      idealDailySpending,
+      spendingDifference,
+      daysAnalyzed: recentDaysCount || currentDay,
+      daysRemaining,
+      remainingBudget: budgetAmount - budgetSpent,
+      recommendations,
+      isOverspending: budgetSpent > (idealDailySpending * currentDay),
+    };
+  };
+
+  const analytics = budgetEnabled && budgetAmount > 0 ? getBudgetAnalytics() : null;
 
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -369,27 +631,274 @@ export default function ExpensesPage() {
   };
 
   return (
-    <div className="min-h-screen p-4 pb-24">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Expenses</h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              Track your spending and categories
-            </p>
+    <div className="min-h-screen flex">
+      {/* Collapsible Sidebar */}
+      <div className={`fixed left-0 top-0 h-full glass border-r-2 border-gray-200 dark:border-gray-700 transition-all duration-300 z-30 ${
+        isSidebarExpanded ? 'w-64' : 'w-16'
+      }`}>
+        <div className="h-full flex flex-col p-3">
+          {/* Toggle Button */}
+          <button
+            onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
+            className="p-3 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors mb-6"
+            title={isSidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            {isSidebarExpanded ? (
+              <div className="flex items-center gap-3">
+                <ChevronLeft size={20} className="text-gray-700 dark:text-gray-300" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Expenses</span>
+              </div>
+            ) : (
+              <Menu size={20} className="text-gray-700 dark:text-gray-300" />
+            )}
+          </button>
+
+          {/* View Toggle */}
+          <div className="mb-6">
+            {isSidebarExpanded ? (
+              <div className="space-y-2">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">VIEW</span>
+                <button
+                  onClick={() => setViewMode("categories")}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
+                    viewMode === "categories"
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Layers size={18} />
+                  <span className="text-sm font-medium">Categories</span>
+                </button>
+                <button
+                  onClick={() => setViewMode("transactions")}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
+                    viewMode === "transactions"
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Receipt size={18} />
+                  <span className="text-sm font-medium">Transactions</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  onClick={() => setViewMode("categories")}
+                  className={`w-full p-3 rounded-xl transition-colors ${
+                    viewMode === "categories"
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                  title="Categories"
+                >
+                  <Layers size={20} />
+                </button>
+                <button
+                  onClick={() => setViewMode("transactions")}
+                  className={`w-full p-3 rounded-xl transition-colors ${
+                    viewMode === "transactions"
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                  title="Transactions"
+                >
+                  <Receipt size={20} />
+                </button>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-3">
-            <Button onClick={() => setIsCategoryModalOpen(true)} variant="secondary" className="flex items-center gap-2">
-              <FolderPlus size={18} />
-              <span className="hidden sm:inline">Add Category</span>
-            </Button>
-            <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
-              <Plus size={18} />
-              Add Expense
-            </Button>
+
+          {/* Month Navigation */}
+          <div className="mb-6">
+            {isSidebarExpanded ? (
+              <div className="space-y-2">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">MONTH</span>
+                <div className="flex items-center justify-between px-2">
+                  <button
+                    onClick={() => navigateMonth("prev")}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                    title="Previous month"
+                  >
+                    <ChevronLeft size={16} className="text-gray-600 dark:text-gray-400" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentMonth(new Date())}
+                    className="text-xs font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                    title="Go to current month"
+                  >
+                    {getMonthYear(currentMonth)}
+                  </button>
+                  <button
+                    onClick={() => navigateMonth("next")}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                    title="Next month"
+                  >
+                    <ChevronRight size={16} className="text-gray-600 dark:text-gray-400" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsSidebarExpanded(true)}
+                className="w-full p-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="Month"
+              >
+                <Calendar size={20} />
+              </button>
+            )}
+          </div>
+
+          {/* Total Section */}
+          <div className="mt-auto">
+            {isSidebarExpanded ? (
+              <div className="space-y-2">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">TOTAL</span>
+                <div className="relative">
+                  <button
+                    onClick={() => setIsTotalsDropdownOpen(!isTotalsDropdownOpen)}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <DollarSign size={16} className="text-gray-600 dark:text-gray-400" />
+                      <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                        {formatCurrency(convertedTotal, homeCurrency)}
+                      </span>
+                    </div>
+                    <ChevronDown 
+                      size={14} 
+                      className={`text-gray-600 dark:text-gray-400 transition-transform ${isTotalsDropdownOpen ? 'rotate-180' : ''}`} 
+                    />
+                  </button>
+
+                  {/* Dropdown */}
+                  {isTotalsDropdownOpen && (
+                    <div className="mt-2 bg-[#f8fafc] dark:bg-[#0f0f0f] rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                      <div className="p-1">
+                        {Object.entries(totals).map(([currency, amount]) => (
+                          <button
+                            key={currency}
+                            onClick={() => {
+                              setSelectedCurrency(currency);
+                              setIsTotalsDropdownOpen(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-xs ${
+                              selectedCurrency === currency ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
+                            }`}
+                          >
+                            <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
+                            <span className="font-semibold text-red-600 dark:text-red-400">
+                              {formatCurrency(amount, currency)}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsSidebarExpanded(true)}
+                className="w-full p-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="Total"
+              >
+                <DollarSign size={20} />
+              </button>
+            )}
           </div>
         </div>
+      </div>
+
+      {/* Main Content */}
+      <div className={`flex-1 transition-all duration-300 ${isSidebarExpanded ? 'ml-64' : 'ml-16'}`}>
+        <div className="p-4 pb-24">
+          <div className="max-w-4xl mx-auto">
+            {/* Header */}
+            <div className="mb-6">
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Expenses</h1>
+              <p className="text-gray-600 dark:text-gray-400 mt-1">
+                Track your spending and categories
+              </p>
+            </div>
+
+            {/* Compact Total Button with Dropdown */}
+            <div className="mb-6 flex items-center gap-3">
+              <div className="relative">
+                <button
+                  onClick={() => setIsTotalsDropdownOpen(!isTotalsDropdownOpen)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl glass border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-500 dark:hover:border-indigo-400 transition-all"
+                >
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total:</span>
+                  <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                    {formatCurrency(convertedTotal, homeCurrency)}
+                  </span>
+                  <ChevronDown 
+                    size={16} 
+                    className={`text-gray-600 dark:text-gray-400 transition-transform ${isTotalsDropdownOpen ? 'rotate-180' : ''}`} 
+                  />
+                </button>
+
+                {/* Dropdown */}
+                {isTotalsDropdownOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setIsTotalsDropdownOpen(false)}
+                    />
+                    <div className="absolute top-full mt-2 left-0 min-w-[240px] bg-[#f8fafc] dark:bg-[#0f0f0f] rounded-xl border-2 border-gray-200 dark:border-gray-700 shadow-xl z-20 overflow-hidden animate-fadeIn">
+                      <div className="p-2">
+                        {Object.entries(totals).map(([currency, amount]) => (
+                          <button
+                            key={currency}
+                            onClick={() => {
+                              setSelectedCurrency(currency);
+                              setIsTotalsDropdownOpen(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
+                              selectedCurrency === currency ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
+                            }`}
+                          >
+                            <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-red-600 dark:text-red-400">
+                                {formatCurrency(amount, currency)}
+                              </span>
+                              <ArrowRight size={14} className="text-gray-400" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-[#f1f5f9] dark:bg-[#0a0a0a]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            Total ({homeCurrency})
+                          </span>
+                          <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                            {formatCurrency(convertedTotal, homeCurrency)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Active Currency Filter Badge */}
+              {selectedCurrency !== "all" && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+                  <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                    Filtered by: {selectedCurrency}
+                  </span>
+                  <button
+                    onClick={() => setSelectedCurrency("all")}
+                    className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
+                  >
+                    <X size={14} className="text-indigo-600 dark:text-indigo-400" />
+                  </button>
+                </div>
+              )}
+            </div>
 
         {/* Budget Card */}
         {budgetEnabled && budgetAmount > 0 && (
@@ -408,9 +917,6 @@ export default function ExpensesPage() {
                     <span className="text-xl font-semibold text-gray-900 dark:text-white">
                       {formatCurrency(budgetAmount, budgetCurrency)}
                     </span>
-                    <span className={`text-sm font-medium ${getBudgetColor()}`}>
-                      ({budgetPercentage.toFixed(0)}%)
-                    </span>
                   </div>
                   <div className="text-right">
                     <span className={`text-lg font-semibold ${getBudgetColor()}`}>
@@ -426,114 +932,72 @@ export default function ExpensesPage() {
                     style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
                   />
                 </div>
+
+                {/* Day Progress Indicator - Current Month Only */}
+                {dayProgress && (
+                  <div className="flex items-center justify-between text-sm pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <span className="text-gray-600 dark:text-gray-400">
+                      Day {dayProgress.currentDay} of {dayProgress.totalDays}
+                    </span>
+                    <button
+                      onClick={() => setIsBudgetAnalyticsOpen(true)}
+                      className={`font-medium ${getProgressStatusColor()} hover:underline cursor-pointer transition-all`}
+                    >
+                      {getProgressStatus()} →
+                    </button>
+                  </div>
+                )}
+
+                {/* Analytics Button - Past Months Only */}
+                {!dayProgress && (() => {
+                  const today = new Date();
+                  const isPastMonth = currentMonth < new Date(today.getFullYear(), today.getMonth(), 1);
+                  
+                  return isPastMonth && (
+                    <div className="flex items-center justify-end text-sm pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <button
+                        onClick={() => setIsBudgetAnalyticsOpen(true)}
+                        className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer transition-all"
+                      >
+                        View Analytics →
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Month Navigation */}
-        <Card className="mb-6">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => navigateMonth("prev")}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-            >
-              <ChevronLeft size={24} className="text-gray-700 dark:text-gray-400" />
-            </button>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-              {getMonthYear(currentMonth)}
-            </h2>
-            <button
-              onClick={() => navigateMonth("next")}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-            >
-              <ChevronRight size={24} className="text-gray-700 dark:text-gray-400" />
-            </button>
-          </div>
-        </Card>
-
-        {/* View Mode Toggle */}
-        <div className="mb-6">
-          <div className="inline-flex rounded-2xl p-1 bg-gray-100 dark:bg-gray-800">
-            <button
-              onClick={() => setViewMode("transactions")}
-              className={`px-6 py-2 rounded-xl font-medium transition-all duration-200 ${
-                viewMode === "transactions"
-                  ? "bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              }`}
-            >
-              Transactions
-            </button>
-            <button
-              onClick={() => setViewMode("categories")}
-              className={`px-6 py-2 rounded-xl font-medium transition-all duration-200 ${
-                viewMode === "categories"
-                  ? "bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              }`}
-            >
-              Categories
-            </button>
-          </div>
-        </div>
-
-        {/* Filters - Show only in transactions view */}
-        {viewMode === "transactions" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <Select
-              label="Filter by Category"
-              options={[
-                { value: "all", label: "All Categories" },
-                ...expenseCategories.map((c) => ({ value: c.id, label: c.name })),
-              ]}
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-            />
-            <Select
-              label="Filter by Currency"
-              options={[
-                { value: "all", label: "All Currencies" },
-                ...CURRENCIES,
-              ]}
-              value={selectedCurrency}
-              onChange={(e) => setSelectedCurrency(e.target.value)}
-            />
-          </div>
-        )}
-
-        {/* Totals */}
-        <Card className="mb-6">
-          <CardHeader title="Totals" />
-          <CardContent>
-            <div className="space-y-4">
-              {Object.entries(totals).map(([currency, amount]) => (
-                <div
-                  key={currency}
-                  className="flex items-center justify-between p-4 rounded-2xl glass-hover"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/30">
-                      <TrendingDown className="text-red-600 dark:text-red-400" size={20} />
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
-                  </div>
-                  <span className="text-lg font-semibold text-red-600 dark:text-red-400">
-                    {formatCurrency(amount, currency)}
-                  </span>
-                </div>
-              ))}
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-200 dark:border-indigo-800">
-                <span className="font-semibold text-gray-900 dark:text-white">
-                  Total ({homeCurrency})
-                </span>
-                <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                  {formatCurrency(convertedTotal, homeCurrency)}
-                </span>
+            {/* Filters - Show only in transactions view */}
+            {viewMode === "transactions" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <Select
+                  label="Filter by Category"
+                  options={[
+                    { value: "all", label: "All Categories" },
+                    ...expenseCategories.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                />
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            )}
+
+            {/* Active Currency Filter Badge */}
+            {selectedCurrency !== "all" && (
+              <div className="mb-6 flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 inline-flex">
+                <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                  Filtered by: {selectedCurrency}
+                </span>
+                <button
+                  onClick={() => setSelectedCurrency("all")}
+                  className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
+                >
+                  <X size={14} className="text-indigo-600 dark:text-indigo-400" />
+                </button>
+              </div>
+            )}
 
         {/* Categories View */}
         {viewMode === "categories" && (
@@ -713,6 +1177,160 @@ export default function ExpensesPage() {
             </Button>
           </form>
         </Modal>
+
+        {/* Budget Analytics Modal */}
+        <Modal
+          isOpen={isBudgetAnalyticsOpen}
+          onClose={() => setIsBudgetAnalyticsOpen(false)}
+          title="Budget Analytics & Recommendations"
+        >
+          {analytics && (
+            <div className="space-y-4">
+              {/* Spending Pattern */}
+              <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  Your Spending Pattern
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      Avg. daily (last {analytics.daysAnalyzed}d):
+                    </span>
+                    <span className="text-lg font-bold text-gray-900 dark:text-white">
+                      {formatCurrency(analytics.avgDailySpending, budgetCurrency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      Ideal daily:
+                    </span>
+                    <span className="text-lg font-semibold text-green-600 dark:text-green-400">
+                      {formatCurrency(analytics.idealDailySpending, budgetCurrency)}
+                    </span>
+                  </div>
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Difference:
+                      </span>
+                      <span className={`text-lg font-bold ${
+                        analytics.spendingDifference > 0 
+                          ? 'text-red-600 dark:text-red-400' 
+                          : 'text-green-600 dark:text-green-400'
+                      }`}>
+                        {analytics.spendingDifference > 0 ? '+' : ''}
+                        {formatCurrency(analytics.spendingDifference, budgetCurrency)}/day
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Current Status */}
+              <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800">
+                <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                  {analytics.isOverspending ? (
+                    <>
+                      You {analytics.daysRemaining > 0 ? 've been' : 'had'} <span className="font-semibold text-red-600 dark:text-red-400">overspending</span> by{' '}
+                      <span className="font-bold">{formatCurrency(Math.abs(analytics.spendingDifference), budgetCurrency)}</span>/day.
+                    </>
+                  ) : (
+                    <>
+                      Great job! {analytics.daysRemaining > 0 ? "You're" : "You were"} <span className="font-semibold text-green-600 dark:text-green-400">under budget</span> by{' '}
+                      <span className="font-bold">{formatCurrency(Math.abs(analytics.spendingDifference), budgetCurrency)}</span>/day.
+                    </>
+                  )}
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {analytics.daysRemaining > 0 
+                    ? `${analytics.daysRemaining} days remaining this month`
+                    : 'Month complete'}
+                </p>
+              </div>
+
+              {/* Recommendations */}
+              {analytics.recommendations.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                    {analytics.isOverspending ? 'To get back on track:' : 'You can afford to spend:'}
+                  </h3>
+                  <div className="space-y-2">
+                    {analytics.recommendations.map((rec, index) => (
+                      <div
+                        key={index}
+                        className="p-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors"
+                      >
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
+                              {rec.label}
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                              ({rec.days} {rec.days === 1 ? 'day' : 'days'})
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                              {formatCurrency(rec.dailyAmount, budgetCurrency)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              per day
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Additional Suggestions */}
+              {!analytics.isOverspending && analytics.remainingBudget > 0 && (
+                <div className="p-3 rounded-xl bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                  <p className="text-xs text-green-800 dark:text-green-200 font-medium mb-1">
+                    💡 {analytics.daysRemaining > 0 ? 'Smart Suggestion' : 'Month Summary'}
+                  </p>
+                  <p className="text-xs text-green-700 dark:text-green-300">
+                    {analytics.daysRemaining > 0 ? (
+                      <>
+                        Transfer excess to savings or use{' '}
+                        {formatCurrency(analytics.remainingBudget / analytics.daysRemaining, budgetCurrency)}/day
+                        for extras!
+                      </>
+                    ) : (
+                      <>
+                        You saved {formatCurrency(analytics.remainingBudget, budgetCurrency)} this month!
+                        Great financial discipline.
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {analytics.isOverspending && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                  <p className="text-xs text-amber-800 dark:text-amber-200 font-medium mb-1">
+                    💡 {analytics.daysRemaining > 0 ? 'Quick Tips' : 'Month Review'}
+                  </p>
+                  {analytics.daysRemaining > 0 ? (
+                    <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc list-inside">
+                      <li>Review recent transactions</li>
+                      <li>Set daily spending alerts</li>
+                      <li>Try meal planning</li>
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      You overspent by {formatCurrency(Math.abs(analytics.remainingBudget), budgetCurrency)} this month. 
+                      Consider adjusting next month's budget or finding areas to cut back.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </Modal>
+          </div>
+        </div>
       </div>
     </div>
   );

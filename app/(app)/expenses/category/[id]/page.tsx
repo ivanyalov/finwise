@@ -95,28 +95,37 @@ export default function CategoryDetailPage() {
 
       setUser(user);
 
-      // Load transactions if store is empty
-      if (transactions.length === 0) {
-        const { data: transactionsData } = await supabase
-          .from("transactions")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("date", { ascending: false });
+      // Always load fresh transactions
+      const { data: transactionsData, error: transError } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false });
 
-        if (transactionsData) {
-          useStore.setState({ transactions: transactionsData });
-        }
+      if (transError) {
+        console.error("Error loading transactions:", transError);
+      } else if (transactionsData) {
+        useStore.setState({ transactions: transactionsData });
       }
 
-      // Load categories if empty
-      if (expenseCategories.length === 0) {
-        const { data: categoriesData } = await supabase
-          .from("expense_categories")
-          .select("*")
-          .eq("user_id", user.id);
+      // Always load fresh categories
+      const { data: categoriesData, error: catError } = await supabase
+        .from("expense_categories")
+        .select("*")
+        .eq("user_id", user.id);
 
-        if (categoriesData) {
-          setExpenseCategories(categoriesData);
+      if (catError) {
+        console.error("Error loading categories:", catError);
+      } else if (categoriesData) {
+        setExpenseCategories(categoriesData);
+        
+        // Find the category in the loaded data
+        const foundCategory = categoriesData.find((c) => c.id === categoryId);
+        if (foundCategory) {
+          setCategory(foundCategory);
+          setEditCategoryName(foundCategory.name);
+        } else {
+          router.push("/expenses");
         }
       }
 
@@ -129,27 +138,6 @@ export default function CategoryDetailPage() {
 
       if (settingsData) {
         useStore.setState({ homeCurrency: settingsData.home_currency || "USD" });
-      }
-
-      // Find the category
-      const foundCategory = expenseCategories.find((c) => c.id === categoryId);
-      if (foundCategory) {
-        setCategory(foundCategory);
-        setEditCategoryName(foundCategory.name);
-      } else {
-        // Try loading from database
-        const { data: categoryData } = await supabase
-          .from("expense_categories")
-          .select("*")
-          .eq("id", categoryId)
-          .single();
-
-        if (categoryData) {
-          setCategory(categoryData);
-          setEditCategoryName(categoryData.name);
-        } else {
-          router.push("/expenses");
-        }
       }
     } catch (error) {
       console.error("Error loading data:", error);
@@ -424,37 +412,44 @@ export default function CategoryDetailPage() {
           </div>
         </div>
 
-        {/* Month Navigation */}
-        <Card className="mb-6">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => navigateMonth("prev")}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-            >
-              <ChevronLeft size={24} className="text-gray-700 dark:text-gray-400" />
-            </button>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-              {getMonthYear(currentMonth)}
-            </h2>
-            <button
-              onClick={() => navigateMonth("next")}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-            >
-              <ChevronRight size={24} className="text-gray-700 dark:text-gray-400" />
-            </button>
-          </div>
-        </Card>
-
-        {/* Month Total */}
+        {/* Month Total with Navigation */}
         <Card className="mb-6">
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <span className="text-lg font-medium text-gray-700 dark:text-gray-300">
-                Month Total
-              </span>
-              <span className="text-2xl font-bold text-red-600 dark:text-red-400">
-                {formatCurrency(monthTotal, homeCurrency)}
-              </span>
+            <div className="space-y-4">
+              {/* Compact Month Navigation */}
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  onClick={() => navigateMonth("prev")}
+                  className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                  title="Previous month"
+                >
+                  <ChevronLeft size={18} className="text-gray-600 dark:text-gray-400" />
+                </button>
+                <button
+                  onClick={() => setCurrentMonth(new Date())}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors min-w-[120px] text-center"
+                  title="Go to current month"
+                >
+                  {getMonthYear(currentMonth)}
+                </button>
+                <button
+                  onClick={() => navigateMonth("next")}
+                  className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                  title="Next month"
+                >
+                  <ChevronRight size={18} className="text-gray-600 dark:text-gray-400" />
+                </button>
+              </div>
+              
+              {/* Month Total */}
+              <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+                <span className="text-lg font-medium text-gray-700 dark:text-gray-300">
+                  Total
+                </span>
+                <span className="text-2xl font-bold text-red-600 dark:text-red-400">
+                  {formatCurrency(monthTotal, homeCurrency)}
+                </span>
+              </div>
             </div>
           </CardContent>
         </Card>

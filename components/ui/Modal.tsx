@@ -40,13 +40,13 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
 
   const sizes = {
     sm: "max-w-md",
-    md: "max-w-lg",
-    lg: "max-w-2xl",
+    md: "max-w-2xl",
+    lg: "max-w-4xl",
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 pb-24"
       onClick={onClose}
     >
       <div
@@ -55,7 +55,7 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
       />
       <div
         className={cn(
-          "relative w-full glass rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto",
+          "relative w-full glass rounded-3xl shadow-2xl overflow-hidden",
           "border-2 border-gray-200 dark:border-gray-700",
           sizes[size]
         )}
@@ -72,7 +72,15 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
             <X size={20} className="text-gray-700 dark:text-gray-400" />
           </button>
         </div>
-        <div className="p-6">{children}</div>
+        <div 
+          className="max-h-[calc(90vh-200px)] overflow-y-auto p-6 pb-8"
+          style={{
+            scrollbarWidth: 'thin',
+            scrollbarColor: 'rgba(156, 163, 175, 0.5) transparent'
+          }}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

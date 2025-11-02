@@ -104,31 +104,31 @@ export default function IncomePage() {
 
       setUser(user);
 
-      // Load all transactions if store is empty
-      if (transactions.length === 0) {
-        const { data: transactionsData } = await supabase
-          .from("transactions")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("date", { ascending: false })
-          .order("created_at", { ascending: false });
+      // Always load fresh transactions
+      const { data: transactionsData, error: transError } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
 
-        if (transactionsData) {
-          useStore.setState({ transactions: transactionsData });
-        }
+      if (transError) {
+        console.error("Error loading transactions:", transError);
+      } else if (transactionsData) {
+        useStore.setState({ transactions: transactionsData });
       }
 
-      // Only load income sources if not already loaded
-      if (incomeSources.length === 0) {
-        const { data: sourcesData } = await supabase
-          .from("income_sources")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("name");
+      // Always load fresh income sources
+      const { data: sourcesData, error: sourcesError } = await supabase
+        .from("income_sources")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
 
-        if (sourcesData) {
-          setIncomeSources(sourcesData);
-        }
+      if (sourcesError) {
+        console.error("Error loading income sources:", sourcesError);
+      } else if (sourcesData) {
+        setIncomeSources(sourcesData);
       }
 
       // Load settings
@@ -250,29 +250,35 @@ export default function IncomePage() {
           </Button>
         </div>
 
-        {/* Month Navigation */}
-        <Card className="mb-6">
-          <div className="flex items-center justify-between">
+        {/* Month Navigation and Filters */}
+        <div className="mb-6 flex flex-col gap-4">
+          {/* Compact Month Navigation */}
+          <div className="flex items-center justify-center sm:justify-start gap-2">
             <button
               onClick={() => navigateMonth("prev")}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              title="Previous month"
             >
-              <ChevronLeft size={24} className="text-gray-700 dark:text-gray-400" />
+              <ChevronLeft size={18} className="text-gray-600 dark:text-gray-400" />
             </button>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+            <button
+              onClick={() => setCurrentMonth(new Date())}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors min-w-[120px] text-center"
+              title="Go to current month"
+            >
               {getMonthYear(currentMonth)}
-            </h2>
+            </button>
             <button
               onClick={() => navigateMonth("next")}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              title="Next month"
             >
-              <ChevronRight size={24} className="text-gray-700 dark:text-gray-400" />
+              <ChevronRight size={18} className="text-gray-600 dark:text-gray-400" />
             </button>
           </div>
-        </Card>
 
-        {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Filters */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select
             label="Filter by Source"
             options={[
@@ -291,6 +297,7 @@ export default function IncomePage() {
             value={selectedCurrency}
             onChange={(e) => setSelectedCurrency(e.target.value)}
           />
+          </div>
         </div>
 
         {/* Totals */}
