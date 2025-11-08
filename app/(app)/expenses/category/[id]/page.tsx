@@ -598,7 +598,7 @@ export default function CategoryDetailPage() {
               label="Currency"
               options={CURRENCIES}
               value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
+              onChange={(value) => setCurrency(value)}
               required
             />
 
@@ -655,7 +655,7 @@ export default function CategoryDetailPage() {
               label="Currency"
               options={CURRENCIES}
               value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
+              onChange={(value) => setCurrency(value)}
               required
             />
 

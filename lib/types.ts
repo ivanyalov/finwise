@@ -24,6 +24,7 @@ export type IncomeSource = {
 export type ExpenseCategory = {
   id: string;
   name: string;
+  currency?: string;
   user_id: string;
   created_at: string;
 };

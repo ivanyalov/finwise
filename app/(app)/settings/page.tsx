@@ -303,7 +303,7 @@ export default function SettingsPage() {
             <Select
               options={THEMES}
               value={theme}
-              onChange={(e) => setTheme(e.target.value as "light" | "dark")}
+              onChange={(value) => setTheme(value as "light" | "dark")}
             />
           </CardContent>
         </Card>
@@ -315,7 +315,7 @@ export default function SettingsPage() {
             <Select
               options={CURRENCIES}
               value={homeCurrency}
-              onChange={(e) => handleCurrencyChange(e.target.value)}
+              onChange={(value) => handleCurrencyChange(value)}
             />
           </CardContent>
         </Card>
@@ -358,7 +358,7 @@ export default function SettingsPage() {
                     label="Budget Currency"
                     options={CURRENCIES}
                     value={budgetCurrency}
-                    onChange={(e) => handleBudgetCurrencyChange(e.target.value)}
+                    onChange={(value) => handleBudgetCurrencyChange(value)}
                   />
                 </div>
               )}

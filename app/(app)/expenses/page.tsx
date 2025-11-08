@@ -16,7 +16,7 @@ import {
   getMonthYear,
   calculateConvertedAmount,
 } from "@/lib/utils";
-import { Plus, TrendingDown, ChevronLeft, ChevronRight, ChevronRight as ArrowRight, ChevronDown, X, FolderPlus, Menu, Layers, Receipt, Calendar, DollarSign } from "lucide-react";
+import { Plus, TrendingDown, ChevronLeft, ChevronRight, ChevronRight as ArrowRight, ChevronDown, X, FolderPlus, Menu, Layers, Receipt, Calendar, DollarSign, Edit2, Trash2 } from "lucide-react";
 
 const CURRENCIES = [
   { value: "USD", label: "USD ($)" },
@@ -27,18 +27,6 @@ const CURRENCIES = [
   { value: "INR", label: "INR (₹)" },
 ];
 
-// Soft pastel colors for categories
-const CATEGORY_COLORS = [
-  "bg-rose-200 dark:bg-rose-900/40",
-  "bg-blue-200 dark:bg-blue-900/40",
-  "bg-green-200 dark:bg-green-900/40",
-  "bg-yellow-200 dark:bg-yellow-900/40",
-  "bg-purple-200 dark:bg-purple-900/40",
-  "bg-pink-200 dark:bg-pink-900/40",
-  "bg-indigo-200 dark:bg-indigo-900/40",
-  "bg-orange-200 dark:bg-orange-900/40",
-];
-
 type ViewMode = "transactions" | "categories";
 
 interface CategoryData {
@@ -47,6 +35,7 @@ interface CategoryData {
   amount: number;
   percentage: number;
   color: string;
+  currency: string;
 }
 
 export default function ExpensesPage() {
@@ -70,10 +59,38 @@ export default function ExpensesPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("categories");
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryCurrency, setNewCategoryCurrency] = useState("USD");
   const [isCategorySubmitting, setIsCategorySubmitting] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editCategoryName, setEditCategoryName] = useState("");
+  const [editCategoryCurrency, setEditCategoryCurrency] = useState("");
+  const [isEditingCategory, setIsEditingCategory] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deletingCategory, setDeletingCategory] = useState<ExpenseCategory | null>(null);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
   const [isBudgetAnalyticsOpen, setIsBudgetAnalyticsOpen] = useState(false);
+  const [isBudgetEditModalOpen, setIsBudgetEditModalOpen] = useState(false);
+  const [isUpdatingBudget, setIsUpdatingBudget] = useState(false);
+  const [editBudgetAmount, setEditBudgetAmount] = useState("");
+  const [editBudgetCurrency, setEditBudgetCurrency] = useState("");
   const [isTotalsDropdownOpen, setIsTotalsDropdownOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  
+  // Transaction editing state
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [isEditingTransaction, setIsEditingTransaction] = useState(false);
+  const [editTransactionAmount, setEditTransactionAmount] = useState("");
+  const [editTransactionCurrency, setEditTransactionCurrency] = useState("");
+  const [editTransactionDate, setEditTransactionDate] = useState("");
+  const [editTransactionNotes, setEditTransactionNotes] = useState("");
+  const [isDeleteTransactionModalOpen, setIsDeleteTransactionModalOpen] = useState(false);
+  const [deletingTransaction, setDeletingTransaction] = useState<Transaction | null>(null);
+  const [isDeletingTransaction, setIsDeletingTransaction] = useState(false);
+  
+  // Transaction details modal
+  const [isTransactionDetailsOpen, setIsTransactionDetailsOpen] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
 
   // Budget state
   const [budgetEnabled, setBudgetEnabled] = useState(false);
@@ -84,6 +101,8 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [category, setCategory] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
+  const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -127,15 +146,6 @@ export default function ExpensesPage() {
       filtered = filtered.filter((t) => t.currency === selectedCurrency);
     }
 
-    console.log("Filtering expenses:", {
-      totalTransactions: transactions.length,
-      expenseTransactions: transactions.filter((t) => t.type === "expense").length,
-      filteredCount: filtered.length,
-      monthStart: monthStart.toISOString(),
-      monthEnd: monthEnd.toISOString(),
-      currentMonth: currentMonth.toISOString(),
-    });
-
     setFilteredTransactions(filtered);
   };
 
@@ -161,7 +171,6 @@ export default function ExpensesPage() {
       if (transError) {
         console.error("Error loading transactions:", transError);
       } else if (transactionsData) {
-        console.log(`Loaded ${transactionsData.length} transactions`);
         useStore.setState({ transactions: transactionsData });
       }
 
@@ -175,7 +184,6 @@ export default function ExpensesPage() {
       if (catError) {
         console.error("Error loading categories:", catError);
       } else if (categoriesData) {
-        console.log(`Loaded ${categoriesData.length} expense categories`);
         setExpenseCategories(categoriesData);
       }
 
@@ -263,22 +271,30 @@ export default function ExpensesPage() {
         return;
       }
 
-      // Find existing category by name or create new one
-      const existingCategory = expenseCategories.find(
-        (c) => c.name.toLowerCase() === category.toLowerCase()
-      );
-      
       let categoryId: string;
       
-      if (existingCategory) {
-        // Use existing category
-        categoryId = existingCategory.id;
-      } else {
+      if (isCreatingNewCategory) {
         // Create new category
+        if (!newCategoryName.trim()) {
+          setError("Please enter a category name");
+          return;
+        }
+
+        // Check if category already exists
+        const exists = expenseCategories.find(
+          (c) => c.name.toLowerCase() === newCategoryName.trim().toLowerCase()
+        );
+
+        if (exists) {
+          setError("A category with this name already exists");
+          return;
+        }
+
         const { data: newCategory, error: categoryError } = await supabase
           .from("expense_categories")
           .insert({
-            name: category.trim(),
+            name: newCategoryName.trim(),
+            currency: newCategoryCurrency,
             user_id: user?.id,
           })
           .select()
@@ -290,6 +306,13 @@ export default function ExpensesPage() {
         
         categoryId = newCategory.id;
         setExpenseCategories([...expenseCategories, newCategory]);
+      } else {
+        // Use selected existing category
+        if (!selectedCategoryId) {
+          setError("Please select a category");
+          return;
+        }
+        categoryId = selectedCategoryId;
       }
 
       // Create transaction
@@ -319,6 +342,9 @@ export default function ExpensesPage() {
       // Reset form
       setAmount("");
       setCategory("");
+      setSelectedCategoryId("");
+      setIsCreatingNewCategory(false);
+      setCurrency("USD");
       setDate(new Date().toISOString().split("T")[0]);
       setNotes("");
       setIsModalOpen(false);
@@ -354,7 +380,10 @@ export default function ExpensesPage() {
     
     filteredTransactions.forEach((t) => {
       const categoryId = t.category || "uncategorized";
-      const convertedAmount = calculateConvertedAmount(t.amount, t.currency, homeCurrency);
+      const category = expenseCategories.find(c => c.id === categoryId);
+      // Use category's own currency, or fall back to transaction currency
+      const targetCurrency = category?.currency || t.currency;
+      const convertedAmount = calculateConvertedAmount(t.amount, t.currency, targetCurrency);
       categoryTotals[categoryId] = (categoryTotals[categoryId] || 0) + convertedAmount;
     });
 
@@ -366,7 +395,8 @@ export default function ExpensesPage() {
         name: cat.name,
         amount: categoryTotals[cat.id] || 0,
         percentage: total > 0 ? (categoryTotals[cat.id] || 0) / total * 100 : 0,
-        color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+        color: "bg-indigo-500 dark:bg-indigo-400", // Uniform purple color for all categories
+        currency: cat.currency || homeCurrency,
       }))
       .sort((a, b) => b.amount - a.amount);
   };
@@ -387,39 +417,6 @@ export default function ExpensesPage() {
     if (budgetPercentage >= 100) return "text-red-600 dark:text-red-400";
     if (budgetPercentage >= 80) return "text-amber-600 dark:text-amber-400";
     return "text-green-600 dark:text-green-400";
-  };
-
-  const getBudgetBarColor = () => {
-    const today = new Date();
-    const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
-    
-    // Check if we're viewing the current month
-    const isCurrentMonth = 
-      today.getFullYear() === currentMonth.getFullYear() && 
-      today.getMonth() === currentMonth.getMonth();
-    
-    // For past/future months, just show color based on total percentage
-    if (!isCurrentMonth) {
-      if (budgetPercentage >= 100) return "bg-red-500";
-      if (budgetPercentage >= 80) return "bg-amber-500";
-      return "bg-green-500";
-    }
-    
-    // For current month, calculate expected spending based on day
-    const currentDay = today.getDate();
-    const expectedPercentage = (currentDay / totalDays) * 100;
-    
-    // Compare actual spending to expected spending
-    const difference = budgetPercentage - expectedPercentage;
-    
-    // Red: spending significantly more than expected (20%+ ahead of pace)
-    if (difference > 20 || budgetPercentage >= 100) return "bg-red-500";
-    
-    // Yellow: spending moderately more than expected (5-20% ahead of pace)
-    if (difference > 5) return "bg-amber-500";
-    
-    // Green: on track or under budget
-    return "bg-green-500";
   };
 
   // Calculate day progress for budget tracking
@@ -450,6 +447,54 @@ export default function ExpensesPage() {
   };
 
   const dayProgress = budgetEnabled && budgetAmount > 0 ? getDayProgress() : null;
+
+  const getBudgetTextColor = () => {
+    if (!dayProgress) {
+      // For past/future months, just show color based on total percentage
+      if (budgetPercentage >= 100) return "text-red-600 dark:text-red-400";
+      if (budgetPercentage >= 80) return "text-amber-600 dark:text-amber-400";
+      return "text-green-600 dark:text-green-400";
+    }
+    
+    // For current month, use the same logic as status color
+    if (budgetPercentage >= 100) {
+      return "text-red-600 dark:text-red-400";
+    }
+    
+    const diff = Math.abs(dayProgress.difference);
+    if (dayProgress.isOnTrack) {
+      return "text-green-600 dark:text-green-400";
+    } else {
+      if (diff > 20) {
+        return "text-red-600 dark:text-red-400";
+      }
+      return "text-amber-600 dark:text-amber-400";
+    }
+  };
+
+  const getBudgetBarColor = () => {
+    if (!dayProgress) {
+      // For past/future months, just show color based on total percentage
+      if (budgetPercentage >= 100) return "bg-red-500";
+      if (budgetPercentage >= 80) return "bg-amber-500";
+      return "bg-green-500";
+    }
+    
+    // For current month, use the same logic as status color
+    if (budgetPercentage >= 100) {
+      return "bg-red-500";
+    }
+    
+    const diff = Math.abs(dayProgress.difference);
+    if (dayProgress.isOnTrack) {
+      return "bg-green-500";
+    } else {
+      if (diff > 20) {
+        return "bg-red-500";
+      }
+      return "bg-amber-500";
+    }
+  };
 
   const getProgressStatus = () => {
     if (!dayProgress) return "";
@@ -522,17 +567,10 @@ export default function ExpensesPage() {
       spendingByDay[day] = (spendingByDay[day] || 0) + convertedAmount;
     });
 
-    // Calculate average daily spending (only for days that have passed)
-    const pastDays = Math.min(currentDay, 7); // Look at last 7 days or fewer
-    let recentTotal = 0;
-    let recentDaysCount = 0;
-    for (let i = Math.max(1, currentDay - pastDays + 1); i <= currentDay; i++) {
-      if (spendingByDay[i]) {
-        recentTotal += spendingByDay[i];
-        recentDaysCount++;
-      }
-    }
-    const avgDailySpending = recentDaysCount > 0 ? recentTotal / recentDaysCount : budgetSpent / currentDay;
+    // Calculate average daily spending from start of month to now
+    // Total spending divided by number of days that have passed
+    const daysElapsed = currentDay; // Days from start of month (1st) to current day
+    const avgDailySpending = daysElapsed > 0 ? budgetSpent / daysElapsed : 0;
 
     // Calculate what daily spending should be
     const idealDailySpending = budgetAmount / totalDays;
@@ -544,45 +582,56 @@ export default function ExpensesPage() {
     if (daysRemaining > 0) {
       const remainingBudget = budgetAmount - budgetSpent;
       
-      // Option 1: Get back on track by end of month
-      const endOfMonthDaily = remainingBudget / daysRemaining;
+      // Option 1: Stay on track in next 3 days (if applicable)
+      if (daysRemaining >= 3) {
+        const periodDays = 3;
+        const targetDay = currentDay + periodDays; // What day it will be after 3 days
+        const idealSpendingByTargetDay = (budgetAmount / totalDays) * targetDay; // Where we should be by that day
+        const availableForPeriod = idealSpendingByTargetDay - budgetSpent; // How much we can spend in these 3 days
+        const dailyAmountFor3Days = availableForPeriod / periodDays;
+        
+        recommendations.push({
+          days: periodDays,
+          label: "in next 3 days",
+          dailyAmount: dailyAmountFor3Days,
+          totalAmount: availableForPeriod,
+        });
+      }
+
+      // Option 2: Stay on track in next week (if applicable)
+      if (daysRemaining >= 7) {
+        const periodDays = 7;
+        const targetDay = currentDay + periodDays; // What day it will be after a week
+        const idealSpendingByTargetDay = (budgetAmount / totalDays) * targetDay; // Where we should be by that day
+        const availableForPeriod = idealSpendingByTargetDay - budgetSpent; // How much we can spend in this week
+        const dailyAmountForWeek = availableForPeriod / periodDays;
+        
+        recommendations.push({
+          days: periodDays,
+          label: "in next week",
+          dailyAmount: dailyAmountForWeek,
+          totalAmount: availableForPeriod,
+        });
+      }
+
+      // Option 3: Stay on track by end of month
+      const idealSpendingByEndOfMonth = budgetAmount; // Should spend exactly the budget by end of month
+      const availableUntilEndOfMonth = idealSpendingByEndOfMonth - budgetSpent; // How much we can spend until end
+      const dailyAmountUntilEnd = availableUntilEndOfMonth / daysRemaining;
+      
       recommendations.push({
         days: daysRemaining,
         label: "by end of month",
-        dailyAmount: endOfMonthDaily,
-        totalAmount: remainingBudget,
+        dailyAmount: dailyAmountUntilEnd,
+        totalAmount: availableUntilEndOfMonth,
       });
-
-      // Option 2: Get back on track in 3 days (if applicable)
-      if (daysRemaining >= 3) {
-        const in3Days = Math.min(3, daysRemaining);
-        const cushion = (remainingBudget - idealDailySpending * in3Days) / Math.max(1, daysRemaining - in3Days);
-        recommendations.push({
-          days: in3Days,
-          label: "in next 3 days",
-          dailyAmount: cushion,
-          totalAmount: cushion * in3Days,
-        });
-      }
-
-      // Option 3: Get back on track in 5 days (if applicable)
-      if (daysRemaining >= 5) {
-        const in5Days = Math.min(5, daysRemaining);
-        const cushion5 = (remainingBudget - idealDailySpending * in5Days) / Math.max(1, daysRemaining - in5Days);
-        recommendations.push({
-          days: in5Days,
-          label: "in next 5 days",
-          dailyAmount: cushion5,
-          totalAmount: cushion5 * in5Days,
-        });
-      }
     }
 
     return {
       avgDailySpending,
       idealDailySpending,
       spendingDifference,
-      daysAnalyzed: recentDaysCount || currentDay,
+      daysAnalyzed: daysElapsed,
       daysRemaining,
       remainingBudget: budgetAmount - budgetSpent,
       recommendations,
@@ -613,7 +662,11 @@ export default function ExpensesPage() {
 
       const { data, error } = await supabase
         .from("expense_categories")
-        .insert({ name: newCategoryName.trim(), user_id: user?.id })
+        .insert({ 
+          name: newCategoryName.trim(), 
+          currency: newCategoryCurrency,
+          user_id: user?.id 
+        })
         .select()
         .single();
 
@@ -621,6 +674,7 @@ export default function ExpensesPage() {
 
       setExpenseCategories([...expenseCategories, data]);
       setNewCategoryName("");
+      setNewCategoryCurrency("USD");
       setIsCategoryModalOpen(false);
     } catch (err: any) {
       console.error("Error creating category:", err);
@@ -630,17 +684,314 @@ export default function ExpensesPage() {
     }
   };
 
+  const handleEditCategory = async (categoryId: string) => {
+    if (!editCategoryName.trim()) {
+      return;
+    }
+
+    setIsEditingCategory(true);
+
+    try {
+      // Check if another category with the same name exists
+      const exists = expenseCategories.find(
+        (c) => c.id !== categoryId && c.name.toLowerCase() === editCategoryName.trim().toLowerCase()
+      );
+
+      if (exists) {
+        alert("A category with this name already exists");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("expense_categories")
+        .update({ 
+          name: editCategoryName.trim(),
+          currency: editCategoryCurrency
+        })
+        .eq("id", categoryId)
+        .select();
+
+      if (error) {
+        console.error("Supabase update error details:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          fullError: error
+        });
+        throw error;
+      }
+      
+      console.log("Update successful, data:", data);
+
+      // Update local state
+      setExpenseCategories(
+        expenseCategories.map((c) =>
+          c.id === categoryId 
+            ? { ...c, name: editCategoryName.trim(), currency: editCategoryCurrency } 
+            : c
+        )
+      );
+
+      setEditingCategoryId(null);
+      setEditCategoryName("");
+      setEditCategoryCurrency("");
+    } catch (err: any) {
+      console.error("Error updating category:", {
+        message: err?.message,
+        details: err?.details,
+        hint: err?.hint,
+        code: err?.code,
+        fullError: err
+      });
+      alert(`Failed to update category: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsEditingCategory(false);
+    }
+  };
+
+  const openDeleteModal = (categoryId: string) => {
+    const category = expenseCategories.find((c) => c.id === categoryId);
+    if (category) {
+      setDeletingCategory(category);
+      setDeleteConfirmationText("");
+      setIsDeleteModalOpen(true);
+    }
+  };
+
+  const closeDeleteModal = () => {
+    setIsDeleteModalOpen(false);
+    setDeletingCategory(null);
+    setDeleteConfirmationText("");
+  };
+
+  // Transaction editing functions
+  const startEditingTransaction = (transaction: Transaction) => {
+    setEditingTransactionId(transaction.id);
+    setEditTransactionAmount(transaction.amount.toString());
+    setEditTransactionCurrency(transaction.currency);
+    setEditTransactionDate(transaction.date);
+    setEditTransactionNotes(transaction.notes || "");
+  };
+
+  const cancelEditingTransaction = () => {
+    setEditingTransactionId(null);
+    setEditTransactionAmount("");
+    setEditTransactionCurrency("");
+    setEditTransactionDate("");
+    setEditTransactionNotes("");
+  };
+
+  const handleEditTransaction = async (transactionId: string) => {
+    const amount = parseFloat(editTransactionAmount);
+    if (!amount || amount <= 0) {
+      alert("Please enter a valid amount");
+      return;
+    }
+
+    setIsEditingTransaction(true);
+
+    try {
+      const { error } = await supabase
+        .from("transactions")
+        .update({
+          amount,
+          currency: editTransactionCurrency,
+          date: editTransactionDate,
+          notes: editTransactionNotes || null,
+        })
+        .eq("id", transactionId);
+
+      if (error) throw error;
+
+      // Update local state
+      useStore.setState({
+        transactions: transactions.map((t) =>
+          t.id === transactionId
+            ? {
+                ...t,
+                amount,
+                currency: editTransactionCurrency,
+                date: editTransactionDate,
+                notes: editTransactionNotes || "",
+              }
+            : t
+        ),
+      });
+
+      cancelEditingTransaction();
+    } catch (error) {
+      console.error("Error updating transaction:", error);
+      alert("Failed to update transaction");
+    } finally {
+      setIsEditingTransaction(false);
+    }
+  };
+
+  const openDeleteTransactionModal = (transaction: Transaction) => {
+    setDeletingTransaction(transaction);
+    setIsDeleteTransactionModalOpen(true);
+  };
+
+  const closeDeleteTransactionModal = () => {
+    setIsDeleteTransactionModalOpen(false);
+    setDeletingTransaction(null);
+  };
+
+  const handleDeleteTransaction = async () => {
+    if (!deletingTransaction) return;
+
+    setIsDeletingTransaction(true);
+
+    try {
+      const { error } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("id", deletingTransaction.id)
+        .eq("user_id", user?.id);
+
+      if (error) throw error;
+
+      // Update local state
+      useStore.setState({
+        transactions: transactions.filter((t) => t.id !== deletingTransaction.id),
+      });
+
+      closeDeleteTransactionModal();
+    } catch (error: any) {
+      console.error("Error deleting transaction:", error);
+      alert(`Failed to delete transaction: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsDeletingTransaction(false);
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!deletingCategory) return;
+
+    // Validate confirmation text
+    const confirmationLower = deleteConfirmationText.trim().toLowerCase();
+    const categoryNameLower = deletingCategory.name.toLowerCase();
+    const isValidConfirmation = 
+      confirmationLower === categoryNameLower || 
+      confirmationLower === "delete";
+
+    if (!isValidConfirmation) {
+      return;
+    }
+
+    setIsDeletingCategory(true);
+
+    try {
+      // First, delete all transactions associated with this category
+      const { error: transactionsError } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("category", deletingCategory.id);
+
+      if (transactionsError) throw transactionsError;
+
+      // Then delete the category itself
+      const { error: categoryError } = await supabase
+        .from("expense_categories")
+        .delete()
+        .eq("id", deletingCategory.id);
+
+      if (categoryError) throw categoryError;
+
+      // Update local state - remove deleted transactions
+      useStore.setState({
+        transactions: transactions.filter((t) => t.category !== deletingCategory.id),
+      });
+
+      // Update categories list
+      setExpenseCategories(expenseCategories.filter((c) => c.id !== deletingCategory.id));
+      
+      closeDeleteModal();
+    } catch (err: any) {
+      console.error("Error deleting category:", err);
+      alert("Failed to delete category");
+    } finally {
+      setIsDeletingCategory(false);
+    }
+  };
+
+  const startEditingCategory = (category: ExpenseCategory) => {
+    setEditingCategoryId(category.id);
+    setEditCategoryName(category.name);
+    setEditCategoryCurrency(category.currency || homeCurrency);
+  };
+
+  const cancelEditingCategory = () => {
+    setEditingCategoryId(null);
+    setEditCategoryName("");
+    setEditCategoryCurrency("");
+  };
+
+  const openBudgetEditModal = () => {
+    setEditBudgetAmount(budgetAmount.toString());
+    setEditBudgetCurrency(budgetCurrency);
+    setIsBudgetEditModalOpen(true);
+  };
+
+  const closeBudgetEditModal = () => {
+    setIsBudgetEditModalOpen(false);
+    setEditBudgetAmount("");
+    setEditBudgetCurrency("");
+  };
+
+  const handleUpdateBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsUpdatingBudget(true);
+
+    try {
+      if (!user?.id) {
+        throw new Error("User not authenticated");
+      }
+
+      const amount = parseFloat(editBudgetAmount);
+      if (!amount || amount <= 0) {
+        throw new Error("Please enter a valid budget amount");
+      }
+
+      const { error } = await supabase
+        .from("user_settings")
+        .upsert(
+          {
+            user_id: user.id,
+            monthly_budget_amount: amount,
+            budget_currency: editBudgetCurrency,
+          },
+          {
+            onConflict: "user_id",
+          }
+        );
+
+      if (error) throw error;
+
+      // Update local state
+      setBudgetAmount(amount);
+      setBudgetCurrency(editBudgetCurrency);
+      closeBudgetEditModal();
+    } catch (err: any) {
+      console.error("Error updating budget:", err);
+      alert(err.message || "Failed to update budget");
+    } finally {
+      setIsUpdatingBudget(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex">
       {/* Collapsible Sidebar */}
-      <div className={`fixed left-0 top-0 h-full glass border-r-2 border-gray-200 dark:border-gray-700 transition-all duration-300 z-30 ${
+      <div className={`fixed left-0 top-0 h-full glass border-r-2 border-gray-200 dark:border-gray-700 sidebar-transition z-30 ${
         isSidebarExpanded ? 'w-64' : 'w-16'
       }`}>
         <div className="h-full flex flex-col p-3">
           {/* Toggle Button */}
           <button
             onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
-            className="p-3 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors mb-6"
+            className={`p-3 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${isSidebarExpanded ? "mb-6" : "mb-2"}`}
             title={isSidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
           >
             {isSidebarExpanded ? (
@@ -654,7 +1005,7 @@ export default function ExpensesPage() {
           </button>
 
           {/* View Toggle */}
-          <div className="mb-6">
+          <div className={isSidebarExpanded ? "mb-6" : "mb-2"}>
             {isSidebarExpanded ? (
               <div className="space-y-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">VIEW</span>
@@ -666,8 +1017,8 @@ export default function ExpensesPage() {
                       : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
-                  <Layers size={18} />
-                  <span className="text-sm font-medium">Categories</span>
+                  <Layers size={18} className="flex-shrink-0" />
+                  <span className="text-sm font-medium flex-1 text-left">Categories</span>
                 </button>
                 <button
                   onClick={() => setViewMode("transactions")}
@@ -677,8 +1028,8 @@ export default function ExpensesPage() {
                       : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
-                  <Receipt size={18} />
-                  <span className="text-sm font-medium">Transactions</span>
+                  <Receipt size={18} className="flex-shrink-0" />
+                  <span className="text-sm font-medium flex-1 text-left">Transactions</span>
                 </button>
               </div>
             ) : (
@@ -710,31 +1061,31 @@ export default function ExpensesPage() {
           </div>
 
           {/* Month Navigation */}
-          <div className="mb-6">
+          <div className={isSidebarExpanded ? "mb-6" : "mb-2"}>
             {isSidebarExpanded ? (
               <div className="space-y-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">MONTH</span>
-                <div className="flex items-center justify-between px-2">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => navigateMonth("prev")}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                    className="flex items-center justify-center p-2 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     title="Previous month"
                   >
-                    <ChevronLeft size={16} className="text-gray-600 dark:text-gray-400" />
+                    <ChevronLeft size={18} />
                   </button>
                   <button
                     onClick={() => setCurrentMonth(new Date())}
-                    className="text-xs font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                    className="flex-1 flex items-center justify-center px-3 py-2 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     title="Go to current month"
                   >
-                    {getMonthYear(currentMonth)}
+                    <span className="text-sm font-medium whitespace-nowrap">{getMonthYear(currentMonth)}</span>
                   </button>
                   <button
                     onClick={() => navigateMonth("next")}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                    className="flex items-center justify-center p-2 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     title="Next month"
                   >
-                    <ChevronRight size={16} className="text-gray-600 dark:text-gray-400" />
+                    <ChevronRight size={18} />
                   </button>
                 </div>
               </div>
@@ -750,50 +1101,68 @@ export default function ExpensesPage() {
           </div>
 
           {/* Total Section */}
-          <div className="mt-auto">
+          <div className={isSidebarExpanded ? "mb-6" : "mb-2"}>
             {isSidebarExpanded ? (
               <div className="space-y-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">TOTAL</span>
                 <div className="relative">
                   <button
                     onClick={() => setIsTotalsDropdownOpen(!isTotalsDropdownOpen)}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
+                      isTotalsDropdownOpen
+                        ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <DollarSign size={16} className="text-gray-600 dark:text-gray-400" />
-                      <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
-                        {formatCurrency(convertedTotal, homeCurrency)}
-                      </span>
-                    </div>
+                    <DollarSign size={18} className="flex-shrink-0" />
+                    <span className="text-sm font-medium flex-1 text-left">
+                      {formatCurrency(convertedTotal, homeCurrency)}
+                    </span>
                     <ChevronDown 
-                      size={14} 
-                      className={`text-gray-600 dark:text-gray-400 transition-transform ${isTotalsDropdownOpen ? 'rotate-180' : ''}`} 
+                      size={18} 
+                      className={`flex-shrink-0 transition-transform ${isTotalsDropdownOpen ? 'rotate-180' : ''}`} 
                     />
                   </button>
 
                   {/* Dropdown */}
                   {isTotalsDropdownOpen && (
-                    <div className="mt-2 bg-[#f8fafc] dark:bg-[#0f0f0f] rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                      <div className="p-1">
-                        {Object.entries(totals).map(([currency, amount]) => (
-                          <button
-                            key={currency}
-                            onClick={() => {
-                              setSelectedCurrency(currency);
-                              setIsTotalsDropdownOpen(false);
-                            }}
-                            className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-xs ${
-                              selectedCurrency === currency ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
-                            }`}
-                          >
-                            <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
-                            <span className="font-semibold text-red-600 dark:text-red-400">
-                              {formatCurrency(amount, currency)}
+                    <>
+                      <div 
+                        className="fixed inset-0 z-10" 
+                        onClick={() => setIsTotalsDropdownOpen(false)}
+                      />
+                      <div className="absolute top-full mt-2 left-0 w-full min-w-[200px] bg-[#f8fafc] dark:bg-[#0f0f0f] rounded-xl border-2 border-gray-200 dark:border-gray-700 shadow-xl z-20 overflow-hidden animate-fadeIn">
+                        <div className="p-1">
+                          {Object.entries(totals).map(([currency, amount]) => (
+                            <button
+                              key={currency}
+                              onClick={() => {
+                                setSelectedCurrency(currency);
+                                setIsTotalsDropdownOpen(false);
+                              }}
+                              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-xs ${
+                                selectedCurrency === currency ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
+                              }`}
+                            >
+                              <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
+                              <span className="font-semibold text-gray-900 dark:text-white">
+                                {formatCurrency(amount, currency)}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-[#f1f5f9] dark:bg-[#0a0a0a]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                              Total ({homeCurrency})
                             </span>
-                          </button>
-                        ))}
+                            <span className="text-sm font-bold text-indigo-500 dark:text-indigo-400">
+                              {formatCurrency(convertedTotal, homeCurrency)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    </>
                   )}
                 </div>
               </div>
@@ -807,11 +1176,12 @@ export default function ExpensesPage() {
               </button>
             )}
           </div>
+
         </div>
       </div>
 
       {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ${isSidebarExpanded ? 'ml-64' : 'ml-16'}`}>
+      <div className="flex-1 ml-16">
         <div className="p-4 pb-24">
           <div className="max-w-4xl mx-auto">
             {/* Header */}
@@ -822,120 +1192,66 @@ export default function ExpensesPage() {
               </p>
             </div>
 
-            {/* Compact Total Button with Dropdown */}
-            <div className="mb-6 flex items-center gap-3">
-              <div className="relative">
+            {/* Active Currency Filter Badge */}
+            {selectedCurrency !== "all" && (
+              <div className="mb-6 flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 inline-flex">
+                <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                  Filtered by: {selectedCurrency}
+                </span>
                 <button
-                  onClick={() => setIsTotalsDropdownOpen(!isTotalsDropdownOpen)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl glass border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-500 dark:hover:border-indigo-400 transition-all"
+                  onClick={() => setSelectedCurrency("all")}
+                  className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
                 >
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total:</span>
-                  <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                    {formatCurrency(convertedTotal, homeCurrency)}
-                  </span>
-                  <ChevronDown 
-                    size={16} 
-                    className={`text-gray-600 dark:text-gray-400 transition-transform ${isTotalsDropdownOpen ? 'rotate-180' : ''}`} 
-                  />
+                  <X size={14} className="text-indigo-600 dark:text-indigo-400" />
                 </button>
-
-                {/* Dropdown */}
-                {isTotalsDropdownOpen && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-10" 
-                      onClick={() => setIsTotalsDropdownOpen(false)}
-                    />
-                    <div className="absolute top-full mt-2 left-0 min-w-[240px] bg-[#f8fafc] dark:bg-[#0f0f0f] rounded-xl border-2 border-gray-200 dark:border-gray-700 shadow-xl z-20 overflow-hidden animate-fadeIn">
-                      <div className="p-2">
-                        {Object.entries(totals).map(([currency, amount]) => (
-                          <button
-                            key={currency}
-                            onClick={() => {
-                              setSelectedCurrency(currency);
-                              setIsTotalsDropdownOpen(false);
-                            }}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
-                              selectedCurrency === currency ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''
-                            }`}
-                          >
-                            <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-red-600 dark:text-red-400">
-                                {formatCurrency(amount, currency)}
-                              </span>
-                              <ArrowRight size={14} className="text-gray-400" />
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                      <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-[#f1f5f9] dark:bg-[#0a0a0a]">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                            Total ({homeCurrency})
-                          </span>
-                          <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
-                            {formatCurrency(convertedTotal, homeCurrency)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
-
-              {/* Active Currency Filter Badge */}
-              {selectedCurrency !== "all" && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
-                  <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-                    Filtered by: {selectedCurrency}
-                  </span>
-                  <button
-                    onClick={() => setSelectedCurrency("all")}
-                    className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
-                  >
-                    <X size={14} className="text-indigo-600 dark:text-indigo-400" />
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
 
         {/* Budget Card */}
         {budgetEnabled && budgetAmount > 0 && (
           <Card className="mb-6">
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <div className="flex items-baseline gap-2 flex-wrap">
+            <CardContent className="p-4">
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-3 mb-2.5">
+                  <div className="flex items-baseline gap-2 flex-wrap flex-1">
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       Budget:
                     </span>
-                    <span className={`text-xl font-bold ${getBudgetColor()}`}>
+                    <span className={`text-lg font-bold ${getBudgetTextColor()}`}>
                       {formatCurrency(budgetSpent, budgetCurrency)}
                     </span>
                     <span className="text-gray-500 dark:text-gray-400">/</span>
-                    <span className="text-xl font-semibold text-gray-900 dark:text-white">
+                    <span className="text-lg font-semibold text-gray-900 dark:text-white">
                       {formatCurrency(budgetAmount, budgetCurrency)}
                     </span>
                   </div>
-                  <div className="text-right">
-                    <span className={`text-lg font-semibold ${getBudgetColor()}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-base font-semibold ${getBudgetTextColor()}`}>
                       {budgetRemaining >= 0 ? formatCurrency(budgetRemaining, budgetCurrency) : formatCurrency(Math.abs(budgetRemaining), budgetCurrency)} {budgetRemaining >= 0 ? "left" : "over"}
                     </span>
+                    <button
+                      onClick={openBudgetEditModal}
+                      className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      title="Edit budget"
+                    >
+                      <Edit2 size={16} strokeWidth={2} />
+                    </button>
                   </div>
                 </div>
 
                 {/* Progress Bar */}
-                <div className="relative w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${getBudgetBarColor()} transition-all duration-700 ease-out rounded-full`}
-                    style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
-                  />
+                <div className="relative">
+                  <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${getBudgetBarColor()} rounded-full`}
+                      style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
+                    />
+                  </div>
                 </div>
 
                 {/* Day Progress Indicator - Current Month Only */}
                 {dayProgress && (
-                  <div className="flex items-center justify-between text-sm pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between text-sm pt-1">
                     <span className="text-gray-600 dark:text-gray-400">
                       Day {dayProgress.currentDay} of {dayProgress.totalDays}
                     </span>
@@ -954,7 +1270,7 @@ export default function ExpensesPage() {
                   const isPastMonth = currentMonth < new Date(today.getFullYear(), today.getMonth(), 1);
                   
                   return isPastMonth && (
-                    <div className="flex items-center justify-end text-sm pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-end text-sm pt-1">
                       <button
                         onClick={() => setIsBudgetAnalyticsOpen(true)}
                         className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer transition-all"
@@ -979,73 +1295,186 @@ export default function ExpensesPage() {
                     ...expenseCategories.map((c) => ({ value: c.id, label: c.name })),
                   ]}
                   value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  onChange={(value) => setSelectedCategory(value)}
                 />
-              </div>
-            )}
-
-            {/* Active Currency Filter Badge */}
-            {selectedCurrency !== "all" && (
-              <div className="mb-6 flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 inline-flex">
-                <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-                  Filtered by: {selectedCurrency}
-                </span>
-                <button
-                  onClick={() => setSelectedCurrency("all")}
-                  className="p-0.5 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
-                >
-                  <X size={14} className="text-indigo-600 dark:text-indigo-400" />
-                </button>
+                <Select
+                  label="Filter by Currency"
+                  options={[
+                    { value: "all", label: "All Currencies" },
+                    ...CURRENCIES,
+                  ]}
+                  value={selectedCurrency}
+                  onChange={(value) => setSelectedCurrency(value)}
+                />
               </div>
             )}
 
         {/* Categories View */}
         {viewMode === "categories" && (
           <Card>
-            <CardHeader title="Spending by Category" />
+            <CardHeader 
+              title="Spending by Category"
+              action={
+                <button
+                  onClick={() => setIsCategoryModalOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+                  title="Add Category"
+                >
+                  <Plus size={18} />
+                  <span className="text-sm font-medium">Add</span>
+                </button>
+              }
+            />
             <CardContent>
               {categoryData.length === 0 ? (
-                <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                  No categories with expenses this month
-                </p>
+                <div className="text-center py-8">
+                  <p className="text-gray-500 dark:text-gray-400 mb-4">
+                    No categories with expenses this month
+                  </p>
+                  <button
+                    onClick={() => setIsCategoryModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+                  >
+                    <Plus size={18} />
+                    <span>Add Category</span>
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {categoryData.map((cat, index) => (
-                    <button
-                      key={cat.id}
-                      onClick={() => handleCategoryClick(cat.id)}
-                      className="w-full text-left p-4 rounded-2xl glass-hover transition-all duration-200 hover:scale-[1.02] group"
-                      style={{
-                        animation: `fadeInUp 0.${index + 3}s ease-out`
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-semibold text-gray-900 dark:text-white">
-                          {cat.name}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-lg font-bold text-red-600 dark:text-red-400">
-                              {formatCurrency(cat.amount, homeCurrency)}
-                            </span>
-                            <span className="text-sm text-gray-500 dark:text-gray-400">
-                              ({cat.percentage.toFixed(0)}%)
-                            </span>
-                          </div>
-                          <ArrowRight size={18} className="text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
-                        </div>
+                  {categoryData.map((cat, index) => {
+                    const isEditing = editingCategoryId === cat.id;
+                    const category = expenseCategories.find((c) => c.id === cat.id);
+                    
+                    return (
+                      <div
+                        key={cat.id}
+                        className="w-full p-4 rounded-2xl glass group relative"
+                      >
+                        {isEditing ? (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              handleEditCategory(cat.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                cancelEditingCategory();
+                              }
+                            }}
+                            className="space-y-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Input
+                              type="text"
+                              label="Category Name"
+                              value={editCategoryName}
+                              onChange={(e) => setEditCategoryName(e.target.value)}
+                              placeholder="Category name"
+                              autoFocus
+                              className="text-base font-semibold"
+                            />
+                            <Select
+                              label="Currency"
+                              options={CURRENCIES}
+                              value={editCategoryCurrency}
+                              onChange={(value) => setEditCategoryCurrency(value)}
+                              required
+                            />
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="submit"
+                                size="sm"
+                                isLoading={isEditingCategory}
+                                className="flex-1"
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={cancelEditingCategory}
+                                className="flex-1"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between mb-2.5">
+                              <button
+                                onClick={() => handleCategoryClick(cat.id)}
+                                className="flex-1 text-left flex items-center gap-2 group/nav cursor-pointer hover:opacity-80 transition-opacity"
+                              >
+                                <span className="font-semibold text-gray-900 dark:text-white group-hover/nav:text-indigo-600 dark:group-hover/nav:text-indigo-400 transition-colors">
+                                  {cat.name}
+                                </span>
+                                <ArrowRight size={16} className="text-gray-400 dark:text-gray-500 group-hover/nav:text-indigo-600 dark:group-hover/nav:text-indigo-400 transition-colors" />
+                              </button>
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-baseline gap-2">
+                                  <span className="text-lg font-bold text-gray-900 dark:text-white">
+                                    {formatCurrency(cat.amount, cat.currency)}
+                                  </span>
+                                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                                    ({cat.percentage.toFixed(0)}%)
+                                  </span>
+                                </div>
+                                {/* Add, Edit and delete icons aligned with text */}
+                                <div className="flex items-center gap-0.5">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedCategoryId(cat.id);
+                                      setIsCreatingNewCategory(false);
+                                      setCategory(cat.name);
+                                      setCurrency(cat.currency || homeCurrency);
+                                      setIsModalOpen(true);
+                                    }}
+                                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                    title="Add expense to this category"
+                                  >
+                                    <Plus size={16} strokeWidth={2} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditingCategory(cat);
+                                    }}
+                                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                    title="Edit category"
+                                  >
+                                    <Edit2 size={16} strokeWidth={2} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDeleteModal(cat.id);
+                                    }}
+                                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                    title="Delete category"
+                                  >
+                                    <Trash2 size={16} strokeWidth={2} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="relative">
+                              <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full ${cat.color} rounded-full`}
+                                  style={{ 
+                                    width: `${cat.percentage}%`
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
-                      <div className="relative w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${cat.color} transition-all duration-700 ease-out rounded-full`}
-                          style={{ 
-                            width: `${cat.percentage}%`,
-                            animationDelay: `${index * 0.1}s`
-                          }}
-                        />
-                      </div>
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -1055,40 +1484,161 @@ export default function ExpensesPage() {
         {/* Transactions List View */}
         {viewMode === "transactions" && (
           <Card>
-            <CardHeader title="Transactions" />
+            <CardHeader 
+              title="Transactions"
+              action={
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+                  title="Add Transaction"
+                >
+                  <Plus size={18} />
+                  <span className="text-sm font-medium">Add</span>
+                </button>
+              }
+            />
             <CardContent>
               {filteredTransactions.length === 0 ? (
-                <p className="text-center text-gray-500 dark:text-gray-400 py-8">
-                  No expenses recorded for this month
-                </p>
+                <div className="text-center py-8">
+                  <p className="text-gray-500 dark:text-gray-400 mb-4">
+                    No expenses recorded for this month
+                  </p>
+                  <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+                  >
+                    <Plus size={18} />
+                    <span>Add Transaction</span>
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-3">
                   {filteredTransactions.map((transaction) => {
                     const categoryName = expenseCategories.find((c) => c.id === transaction.category)?.name || transaction.category || "Expense";
+                    const isEditing = editingTransactionId === transaction.id;
                     
                     return (
                       <div
                         key={transaction.id}
-                        className="flex items-center justify-between p-4 rounded-2xl glass-hover"
+                        className={`p-4 rounded-2xl glass transition-all duration-200 ${
+                          isEditing ? '' : 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800/50'
+                        }`}
+                        onClick={() => {
+                          if (!isEditing) {
+                            setSelectedTransaction(transaction);
+                            setIsTransactionDetailsOpen(true);
+                          }
+                        }}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/30">
-                            <TrendingDown className="text-red-600 dark:text-red-400" size={20} />
+                        {isEditing ? (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              handleEditTransaction(transaction.id);
+                            }}
+                            className="space-y-3"
+                          >
+                            <div className="grid grid-cols-2 gap-3">
+                              <Input
+                                type="number"
+                                label="Amount"
+                                value={editTransactionAmount}
+                                onChange={(e) => setEditTransactionAmount(e.target.value)}
+                                step="0.01"
+                                min="0"
+                                required
+                              />
+                              <Select
+                                label="Currency"
+                                options={CURRENCIES}
+                                value={editTransactionCurrency}
+                                onChange={(value) => setEditTransactionCurrency(value)}
+                                required
+                              />
+                            </div>
+                            <Input
+                              type="date"
+                              label="Date"
+                              value={editTransactionDate}
+                              onChange={(e) => setEditTransactionDate(e.target.value)}
+                              required
+                            />
+                            <Input
+                              type="text"
+                              label="Notes (optional)"
+                              value={editTransactionNotes}
+                              onChange={(e) => setEditTransactionNotes(e.target.value)}
+                            />
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="submit"
+                                size="sm"
+                                isLoading={isEditingTransaction}
+                                className="flex-1"
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={cancelEditingTransaction}
+                                className="flex-1"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="flex items-center justify-between group">
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/30">
+                                <TrendingDown className="text-red-600 dark:text-red-400" size={20} />
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                    {categoryName}
+                                  </p>
+                                  <ArrowRight 
+                                    size={16} 
+                                    className="text-gray-400 dark:text-gray-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors" 
+                                  />
+                                </div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">
+                                  {formatDate(transaction.date)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-3">
+                              <p className="font-semibold text-gray-900 dark:text-white">
+                                -{formatCurrency(transaction.amount, transaction.currency)}
+                              </p>
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditingTransaction(transaction);
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                  title="Edit transaction"
+                                >
+                                  <Edit2 size={16} strokeWidth={2} />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDeleteTransactionModal(transaction);
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                                  title="Delete transaction"
+                                >
+                                  <Trash2 size={16} strokeWidth={2} />
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-medium text-gray-900 dark:text-white">
-                              {categoryName}
-                            </p>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              {formatDate(transaction.date)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-red-600 dark:text-red-400">
-                            -{formatCurrency(transaction.amount, transaction.currency)}
-                          </p>
-                        </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1104,6 +1654,7 @@ export default function ExpensesPage() {
           onClose={() => {
             setIsCategoryModalOpen(false);
             setNewCategoryName("");
+            setNewCategoryCurrency("USD");
           }} 
           title="Add Category"
         >
@@ -1116,6 +1667,14 @@ export default function ExpensesPage() {
               onChange={(e) => setNewCategoryName(e.target.value)}
               required
             />
+            
+            <Select
+              label="Currency"
+              options={CURRENCIES}
+              value={newCategoryCurrency}
+              onChange={(value) => setNewCategoryCurrency(value)}
+              required
+            />
 
             <Button type="submit" className="w-full" isLoading={isCategorySubmitting}>
               Create Category
@@ -1123,8 +1682,291 @@ export default function ExpensesPage() {
           </form>
         </Modal>
 
+        {/* Delete Category Confirmation Modal */}
+        <Modal
+          isOpen={isDeleteModalOpen}
+          onClose={closeDeleteModal}
+          title="Delete Category"
+        >
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800">
+              <p className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+                ⚠️ Warning: This action cannot be undone
+              </p>
+              <p className="text-sm text-red-700 dark:text-red-300">
+                Deleting <strong>{deletingCategory?.name}</strong> will permanently remove the category and <strong>all transactions</strong> associated with it.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                To confirm deletion, please type the category name <strong>"{deletingCategory?.name}"</strong> or type <strong>"delete"</strong>:
+              </p>
+              
+              <Input
+                type="text"
+                value={deleteConfirmationText}
+                onChange={(e) => setDeleteConfirmationText(e.target.value)}
+                placeholder={deletingCategory?.name || "Category name or 'delete'"}
+                autoFocus
+              />
+
+              <div className="flex items-center gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={closeDeleteModal}
+                  className="flex-1"
+                  disabled={isDeletingCategory}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={handleDeleteCategory}
+                  className="flex-1"
+                  isLoading={isDeletingCategory}
+                  disabled={
+                    isDeletingCategory ||
+                    !deleteConfirmationText.trim() ||
+                    (
+                      deleteConfirmationText.trim().toLowerCase() !== deletingCategory?.name.toLowerCase() &&
+                      deleteConfirmationText.trim().toLowerCase() !== "delete"
+                    )
+                  }
+                >
+                  Delete Category
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Edit Budget Modal */}
+        <Modal
+          isOpen={isBudgetEditModalOpen}
+          onClose={closeBudgetEditModal}
+          title="Edit Budget"
+        >
+          <form onSubmit={handleUpdateBudget} className="space-y-4">
+            <Input
+              type="number"
+              label="Budget Amount"
+              placeholder="0.00"
+              value={editBudgetAmount}
+              onChange={(e) => setEditBudgetAmount(e.target.value)}
+              required
+              step="0.01"
+              min="0"
+            />
+
+            <Select
+              label="Currency"
+              options={CURRENCIES}
+              value={editBudgetCurrency}
+              onChange={(value) => setEditBudgetCurrency(value)}
+              required
+            />
+
+            <div className="flex items-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={closeBudgetEditModal}
+                className="flex-1"
+                disabled={isUpdatingBudget}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                isLoading={isUpdatingBudget}
+              >
+                Update Budget
+              </Button>
+            </div>
+          </form>
+        </Modal>
+
+        {/* Delete Transaction Confirmation Modal */}
+        <Modal
+          isOpen={isDeleteTransactionModalOpen}
+          onClose={closeDeleteTransactionModal}
+          title="Delete Transaction"
+        >
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800">
+              <p className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+                ⚠️ Warning: This action cannot be undone
+              </p>
+              <p className="text-sm text-red-700 dark:text-red-300">
+                Are you sure you want to delete this transaction?
+              </p>
+              {deletingTransaction && (
+                <div className="mt-3 p-3 rounded-lg bg-white dark:bg-gray-900 border border-red-200 dark:border-red-800">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                    {formatCurrency(deletingTransaction.amount, deletingTransaction.currency)}
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    {formatDate(deletingTransaction.date)}
+                  </p>
+                  {deletingTransaction.notes && (
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      {deletingTransaction.notes}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={closeDeleteTransactionModal}
+                className="flex-1"
+                disabled={isDeletingTransaction}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={handleDeleteTransaction}
+                className="flex-1"
+                isLoading={isDeletingTransaction}
+              >
+                Delete Transaction
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Transaction Details Modal */}
+        <Modal
+          isOpen={isTransactionDetailsOpen}
+          onClose={() => {
+            setIsTransactionDetailsOpen(false);
+            setSelectedTransaction(null);
+          }}
+          title="Transaction Details"
+          headerActions={
+            selectedTransaction && (
+              <>
+                <button
+                  onClick={() => {
+                    setIsTransactionDetailsOpen(false);
+                    startEditingTransaction(selectedTransaction);
+                  }}
+                  className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                  title="Edit transaction"
+                >
+                  <Edit2 size={18} className="text-gray-700 dark:text-gray-400" />
+                </button>
+                <button
+                  onClick={() => {
+                    setIsTransactionDetailsOpen(false);
+                    openDeleteTransactionModal(selectedTransaction);
+                  }}
+                  className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                  title="Delete transaction"
+                >
+                  <Trash2 size={18} className="text-gray-700 dark:text-gray-400" />
+                </button>
+              </>
+            )
+          }
+        >
+          {selectedTransaction && (
+            <div className="space-y-4">
+              {/* Amount */}
+              <div className="p-4 rounded-xl glass border-2 border-indigo-200 dark:border-indigo-800">
+                <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 mb-1">Amount</p>
+                <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+                  -{formatCurrency(selectedTransaction.amount, selectedTransaction.currency)}
+                </p>
+              </div>
+
+              {/* Category */}
+              <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Category</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {expenseCategories.find((c) => c.id === selectedTransaction.category)?.name || 
+                   selectedTransaction.category || "Expense"}
+                </p>
+              </div>
+
+              {/* Date & Time */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Date</p>
+                  <p className="text-base font-semibold text-gray-900 dark:text-white">
+                    {formatDate(selectedTransaction.date)}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Time</p>
+                  <p className="text-base font-semibold text-gray-900 dark:text-white">
+                    {new Date(selectedTransaction.created_at).toLocaleTimeString('en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              {/* Currency */}
+              <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Currency</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {selectedTransaction.currency}
+                </p>
+              </div>
+
+              {/* Notes */}
+              {selectedTransaction.notes && (
+                <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</p>
+                  <p className="text-base text-gray-900 dark:text-white">
+                    {selectedTransaction.notes}
+                  </p>
+                </div>
+              )}
+
+              {/* Transaction ID */}
+              <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Transaction ID</p>
+                <p className="text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
+                  {selectedTransaction.id}
+                </p>
+              </div>
+
+              {/* Close Button */}
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setIsTransactionDetailsOpen(false);
+                    setSelectedTransaction(null);
+                  }}
+                  className="w-full"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+
         {/* Add Expense Modal */}
-        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add Expense">
+        <Modal isOpen={isModalOpen} onClose={() => {
+          setIsModalOpen(false);
+          setSelectedCategoryId("");
+          setIsCreatingNewCategory(false);
+        }} title="Add Expense">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               type="number"
@@ -1141,18 +1983,60 @@ export default function ExpensesPage() {
               label="Currency"
               options={CURRENCIES}
               value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
+              onChange={(value) => setCurrency(value)}
               required
             />
 
-            <Input
-              type="text"
-              label="Category"
-              placeholder="e.g., Food, Transport, Bills"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              required
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Category
+              </label>
+              <Select
+                options={[
+                  { value: "", label: "Create new category..." },
+                  ...expenseCategories.map((c) => ({ 
+                    value: c.id, 
+                    label: c.name 
+                  }))
+                ]}
+                value={selectedCategoryId}
+                onChange={(value) => {
+                  if (value === "") {
+                    setIsCreatingNewCategory(true);
+                    setSelectedCategoryId("");
+                  } else {
+                    setIsCreatingNewCategory(false);
+                    setSelectedCategoryId(value);
+                    const selectedCat = expenseCategories.find(c => c.id === value);
+                    if (selectedCat) {
+                      setCategory(selectedCat.name);
+                      setCurrency(selectedCat.currency || homeCurrency);
+                    }
+                  }
+                }}
+                required={!isCreatingNewCategory}
+              />
+              
+              {isCreatingNewCategory && (
+                <div className="mt-3 space-y-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700">
+                  <Input
+                    type="text"
+                    label="New Category Name"
+                    placeholder="e.g., Food, Transport, Bills"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    required
+                  />
+                  <Select
+                    label="Category Currency"
+                    options={CURRENCIES}
+                    value={newCategoryCurrency}
+                    onChange={(value) => setNewCategoryCurrency(value)}
+                    required
+                  />
+                </div>
+              )}
+            </div>
 
             <Input
               type="date"
@@ -1194,7 +2078,7 @@ export default function ExpensesPage() {
                 <div className="space-y-2">
                   <div className="flex justify-between items-baseline">
                     <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Avg. daily (last {analytics.daysAnalyzed}d):
+                      Avg. daily ({analytics.daysAnalyzed} {analytics.daysAnalyzed === 1 ? 'day' : 'days'}):
                     </span>
                     <span className="text-lg font-bold text-gray-900 dark:text-white">
                       {formatCurrency(analytics.avgDailySpending, budgetCurrency)}
@@ -1309,17 +2193,17 @@ export default function ExpensesPage() {
 
               {analytics.isOverspending && (
                 <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                  <p className="text-xs text-amber-800 dark:text-amber-200 font-medium mb-1">
+                  <p className="text-xs text-amber-800 dark:text-white font-medium mb-1">
                     💡 {analytics.daysRemaining > 0 ? 'Quick Tips' : 'Month Review'}
                   </p>
                   {analytics.daysRemaining > 0 ? (
-                    <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc list-inside">
+                    <ul className="text-xs text-amber-700 dark:text-white space-y-1 list-disc list-inside">
                       <li>Review recent transactions</li>
                       <li>Set daily spending alerts</li>
                       <li>Try meal planning</li>
                     </ul>
                   ) : (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                    <p className="text-xs text-amber-700 dark:text-white">
                       You overspent by {formatCurrency(Math.abs(analytics.remainingBudget), budgetCurrency)} this month. 
                       Consider adjusting next month's budget or finding areas to cut back.
                     </p>

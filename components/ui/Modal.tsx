@@ -10,9 +10,10 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   size?: "sm" | "md" | "lg";
+  headerActions?: ReactNode;
 }
 
-export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, size = "md", headerActions }: ModalProps) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
@@ -65,12 +66,15 @@ export function Modal({ isOpen, onClose, title, children, size = "md" }: ModalPr
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
             {title}
           </h2>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-          >
-            <X size={20} className="text-gray-700 dark:text-gray-400" />
-          </button>
+          <div className="flex items-center gap-2">
+            {headerActions}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+            >
+              <X size={20} className="text-gray-700 dark:text-gray-400" />
+            </button>
+          </div>
         </div>
         <div 
           className="max-h-[calc(90vh-200px)] overflow-y-auto p-6 pb-8"
