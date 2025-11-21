@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useStore } from "@/lib/store/useStore";
-import { Transaction } from "@/lib/types";
+import { Project, Transaction } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
@@ -12,23 +12,18 @@ import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
 import {
   formatCurrency,
-  formatDate,
   getMonthYear,
   calculateConvertedAmount,
 } from "@/lib/utils";
 import {
   Plus,
   TrendingUp,
+  TrendingDown,
   ChevronLeft,
   ChevronRight,
-  DollarSign,
-  Menu,
-  Calendar,
-  Receipt,
+  Briefcase,
+  FolderOpen,
   ArrowRight,
-  Edit2,
-  Trash2,
-  ChevronDown,
 } from "lucide-react";
 
 const CURRENCIES = [
@@ -40,87 +35,41 @@ const CURRENCIES = [
   { value: "INR", label: "INR (₹)" },
 ];
 
+const PROJECT_COLORS = [
+  "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800",
+  "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800",
+  "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800",
+  "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800",
+  "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800",
+  "bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800",
+];
+
 export default function IncomePage() {
   const router = useRouter();
   const {
     user,
     homeCurrency,
     transactions,
-    incomeSources,
+    projects,
     setUser,
-    setIncomeSources,
+    setProjects,
     setLoading,
-    addTransaction,
   } = useStore();
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedSource, setSelectedSource] = useState<string>("all");
-  const [selectedCurrency, setSelectedCurrency] = useState<string>("all");
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
-  const [isTotalsDropdownOpen, setIsTotalsDropdownOpen] = useState(false);
 
-  // Transaction details modal
-  const [isTransactionDetailsOpen, setIsTransactionDetailsOpen] = useState(false);
-  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
-
-  // Delete transaction modal
-  const [isDeleteTransactionModalOpen, setIsDeleteTransactionModalOpen] = useState(false);
-  const [deletingTransaction, setDeletingTransaction] = useState<Transaction | null>(null);
-  const [isDeletingTransaction, setIsDeletingTransaction] = useState(false);
-
-  // Inline editing
-  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
-  const [isEditingTransaction, setIsEditingTransaction] = useState(false);
-  const [editTransactionAmount, setEditTransactionAmount] = useState("");
-  const [editTransactionCurrency, setEditTransactionCurrency] = useState("");
-  const [editTransactionDate, setEditTransactionDate] = useState("");
-  const [editTransactionNotes, setEditTransactionNotes] = useState("");
-
-  // Form state
-  const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState("USD");
-  const [source, setSource] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [notes, setNotes] = useState("");
+  // Form state for creating project
+  const [projectName, setProjectName] = useState("");
+  const [projectCurrency, setProjectCurrency] = useState("USD");
+  const [projectStatus, setProjectStatus] = useState<"active" | "completed" | "on_hold">("active");
+  const [projectNotes, setProjectNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     loadUserAndData();
   }, []);
-
-  useEffect(() => {
-    filterTransactions();
-  }, [currentMonth, selectedSource, selectedCurrency, transactions]);
-
-  // Reset currency filter when month changes
-  useEffect(() => {
-    setSelectedCurrency("all");
-    setIsTotalsDropdownOpen(false);
-  }, [currentMonth]);
-
-  const filterTransactions = () => {
-    const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-    const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
-    monthEnd.setHours(23, 59, 59, 999);
-
-    let filtered = transactions.filter((t) => t.type === "income").filter((t) => {
-      const transactionDate = new Date(t.date);
-      return transactionDate >= monthStart && transactionDate <= monthEnd;
-    });
-
-    if (selectedSource !== "all") {
-      filtered = filtered.filter((t) => t.source === selectedSource);
-    }
-
-    if (selectedCurrency !== "all") {
-      filtered = filtered.filter((t) => t.currency === selectedCurrency);
-    }
-
-    setFilteredTransactions(filtered);
-  };
 
   const loadUserAndData = async () => {
     setLoading(true);
@@ -133,13 +82,12 @@ export default function IncomePage() {
 
       setUser(user);
 
-      // Always load fresh transactions
+      // Load transactions
       const { data: transactionsData, error: transError } = await supabase
         .from("transactions")
         .select("*")
         .eq("user_id", user.id)
-        .order("date", { ascending: false })
-        .order("created_at", { ascending: false });
+        .order("date", { ascending: false });
 
       if (transError) {
         console.error("Error loading transactions:", transError);
@@ -147,17 +95,17 @@ export default function IncomePage() {
         useStore.setState({ transactions: transactionsData });
       }
 
-      // Always load fresh income sources
-      const { data: sourcesData, error: sourcesError } = await supabase
-        .from("income_sources")
+      // Load projects
+      const { data: projectsData, error: projectsError } = await supabase
+        .from("projects")
         .select("*")
         .eq("user_id", user.id)
-        .order("name");
+        .order("created_at", { ascending: false });
 
-      if (sourcesError) {
-        console.error("Error loading income sources:", sourcesError);
-      } else if (sourcesData) {
-        setIncomeSources(sourcesData);
+      if (projectsError) {
+        console.error("Error loading projects:", projectsError);
+      } else if (projectsData) {
+        setProjects(projectsData);
       }
 
       // Load settings
@@ -177,82 +125,87 @@ export default function IncomePage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsSubmitting(true);
 
     try {
-      if (!amount || parseFloat(amount) <= 0) {
-        setError("Please enter a valid amount");
+      if (!projectName.trim()) {
+        setError("Please enter a project name");
         return;
       }
 
-      // Create source if it doesn't exist
-      let sourceId = source;
-      if (!incomeSources.find((s) => s.id === source)) {
-        const { data: newSource, error: sourceError } = await supabase
-          .from("income_sources")
-          .insert({
-            name: source,
-            user_id: user?.id,
-          })
-          .select()
-          .single();
-
-        if (!sourceError && newSource) {
-          sourceId = newSource.id;
-          setIncomeSources([...incomeSources, newSource]);
-        }
-      }
-
-      // Create transaction
-      const { data: newTransaction, error: transactionError } = await supabase
-        .from("transactions")
+      const { data: newProject, error: projectError } = await supabase
+        .from("projects")
         .insert({
-          type: "income",
-          amount: parseFloat(amount),
-          currency,
-          date,
-          source: sourceId,
-          notes: notes || null,
+          name: projectName,
+          currency: projectCurrency,
+          status: projectStatus,
+          notes: projectNotes || null,
           user_id: user?.id,
         })
         .select()
         .single();
 
-      if (transactionError) throw transactionError;
+      if (projectError) throw projectError;
 
-      // Add to store
-      if (newTransaction) {
-        addTransaction(newTransaction);
+      if (newProject) {
+        useStore.getState().addProject(newProject);
       }
 
       // Reset form
-      setAmount("");
-      setSource("");
-      setDate(new Date().toISOString().split("T")[0]);
-      setNotes("");
-      setIsModalOpen(false);
+      setProjectName("");
+      setProjectCurrency("USD");
+      setProjectStatus("active");
+      setProjectNotes("");
+      setIsCreateProjectModalOpen(false);
     } catch (err: any) {
-      setError(err.message || "Failed to add income");
+      setError(err.message || "Failed to create project");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const calculateTotals = () => {
-    const totals: Record<string, number> = {};
-    filteredTransactions.forEach((t) => {
-      totals[t.currency] = (totals[t.currency] || 0) + t.amount;
-    });
-    return totals;
+  const calculateProjectIncome = (projectId: string, month: Date) => {
+    const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
+    const monthEnd = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+
+    return transactions
+      .filter((t) => t.type === "income" && t.project_id === projectId)
+      .filter((t) => {
+        const transactionDate = new Date(t.date);
+        return transactionDate >= monthStart && transactionDate <= monthEnd;
+      })
+      .reduce((sum, t) => sum + t.amount, 0);
   };
 
-  const totals = calculateTotals();
-  const convertedTotal = Object.entries(totals).reduce((sum, [currency, amount]) => {
-    return sum + calculateConvertedAmount(amount, currency, homeCurrency);
-  }, 0);
+  const calculatePreviousMonthIncome = (projectId: string, month: Date) => {
+    const prevMonth = new Date(month.getFullYear(), month.getMonth() - 1, 1);
+    return calculateProjectIncome(projectId, prevMonth);
+  };
+
+  const calculatePercentageChange = (current: number, previous: number) => {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return ((current - previous) / previous) * 100;
+  };
+
+  const calculateTotalIncome = () => {
+    const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+
+    return transactions
+      .filter((t) => t.type === "income")
+      .filter((t) => {
+        const transactionDate = new Date(t.date);
+        return transactionDate >= monthStart && transactionDate <= monthEnd;
+      })
+      .reduce((sum, t) => {
+        return sum + calculateConvertedAmount(t.amount, t.currency, homeCurrency);
+      }, 0);
+  };
 
   const navigateMonth = (direction: "prev" | "next") => {
     setCurrentMonth(
@@ -260,688 +213,206 @@ export default function IncomePage() {
     );
   };
 
-  const startEditingTransaction = (transaction: Transaction) => {
-    setEditingTransactionId(transaction.id);
-    setEditTransactionAmount(transaction.amount.toString());
-    setEditTransactionCurrency(transaction.currency);
-    setEditTransactionDate(transaction.date.split("T")[0]);
-    setEditTransactionNotes(transaction.notes || "");
+  const getProjectColor = (index: number) => {
+    return PROJECT_COLORS[index % PROJECT_COLORS.length];
   };
 
-  const cancelEditingTransaction = () => {
-    setEditingTransactionId(null);
-    setEditTransactionAmount("");
-    setEditTransactionCurrency("");
-    setEditTransactionDate("");
-    setEditTransactionNotes("");
-  };
-
-  const handleEditTransaction = async (transactionId: string) => {
-    setIsEditingTransaction(true);
-
-    try {
-      if (!editTransactionAmount || parseFloat(editTransactionAmount) <= 0) {
-        alert("Please enter a valid amount");
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("transactions")
-        .update({
-          amount: parseFloat(editTransactionAmount),
-          currency: editTransactionCurrency,
-          date: editTransactionDate,
-          notes: editTransactionNotes || null,
-        })
-        .eq("id", transactionId)
-        .eq("user_id", user?.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      if (data) {
-        useStore.setState({
-          transactions: transactions.map((t) => (t.id === transactionId ? data : t)),
-        });
-      }
-
-      cancelEditingTransaction();
-    } catch (err: any) {
-      console.error("Error updating transaction:", err);
-      alert("Failed to update transaction");
-    } finally {
-      setIsEditingTransaction(false);
-    }
-  };
-
-  const openDeleteTransactionModal = (transaction: Transaction) => {
-    setDeletingTransaction(transaction);
-    setIsDeleteTransactionModalOpen(true);
-  };
-
-  const closeDeleteTransactionModal = () => {
-    setDeletingTransaction(null);
-    setIsDeleteTransactionModalOpen(false);
-  };
-
-  const handleDeleteTransaction = async () => {
-    if (!deletingTransaction) return;
-
-    setIsDeletingTransaction(true);
-
-    try {
-      const { error } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("id", deletingTransaction.id)
-        .eq("user_id", user?.id);
-
-      if (error) throw error;
-
-      useStore.setState({
-        transactions: transactions.filter((t) => t.id !== deletingTransaction.id),
-      });
-      closeDeleteTransactionModal();
-    } catch (err: any) {
-      console.error("Error deleting transaction:", err);
-      alert("Failed to delete transaction");
-    } finally {
-      setIsDeletingTransaction(false);
-    }
-  };
+  const totalIncome = calculateTotalIncome();
 
   return (
-    <div className="min-h-screen flex">
-      {/* Sidebar */}
-      <div
-        className={`fixed left-0 top-0 h-full glass border-r-2 border-gray-200 dark:border-gray-700 sidebar-transition z-30 ${
-          isSidebarExpanded ? "w-64" : "w-16"
-        }`}
-      >
-        <div className="h-full flex flex-col p-3">
-          {/* Toggle Button */}
-          <button
-            onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
-            className={`p-3 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors ${
-              isSidebarExpanded ? "mb-6" : "mb-2"
-            }`}
-            title={isSidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
-          >
-            {isSidebarExpanded ? (
-              <div className="flex items-center gap-3">
-                <ChevronLeft size={20} className="text-gray-700 dark:text-gray-300" />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Income</span>
-              </div>
-            ) : (
-              <Menu size={20} className="text-gray-700 dark:text-gray-300" />
-            )}
-          </button>
-
-          {/* View Section */}
-          <div className={isSidebarExpanded ? "mb-6" : "mb-2"}>
-            {isSidebarExpanded ? (
-              <div className="space-y-2">
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">VIEW</span>
-                <button
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400"
-                >
-                  <Receipt size={18} className="flex-shrink-0" />
-                  <span className="text-sm font-medium flex-1 text-left">Transactions</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <button
-                  className="w-full p-3 rounded-xl transition-colors bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400"
-                  title="Transactions"
-                >
-                  <Receipt size={20} />
-                </button>
-              </div>
-            )}
+    <div className="min-h-screen p-8 pb-24">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">Income</h1>
+              <p className="text-gray-600 dark:text-gray-400">
+                Manage your projects and track income by client
+              </p>
+            </div>
+            <Button
+              onClick={() => setIsCreateProjectModalOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Plus size={20} />
+              New Project
+            </Button>
           </div>
 
-          {/* Month Navigation */}
-          <div className={isSidebarExpanded ? "mb-6" : "mb-2"}>
-            {isSidebarExpanded ? (
-              <div className="space-y-2">
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">MONTH</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => navigateMonth("prev")}
-                    className="flex items-center justify-center p-2 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    title="Previous month"
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button
-                    onClick={() => setCurrentMonth(new Date())}
-                    className="flex-1 flex items-center justify-center px-3 py-2 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    title="Go to current month"
-                  >
-                    <span className="text-sm font-medium whitespace-nowrap">{getMonthYear(currentMonth)}</span>
-                  </button>
-                  <button
-                    onClick={() => navigateMonth("next")}
-                    className="flex items-center justify-center p-2 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    title="Next month"
-                  >
-                    <ChevronRight size={18} />
-                  </button>
-                </div>
-              </div>
-            ) : (
+          {/* Month Navigation and Total */}
+          <div className="flex items-center justify-between p-6 rounded-2xl glass border-2 border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-4">
               <button
-                onClick={() => setIsSidebarExpanded(true)}
-                className="w-full p-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                title="Month"
+                onClick={() => navigateMonth("prev")}
+                className="p-2 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
               >
-                <Calendar size={20} />
+                <ChevronLeft size={24} />
               </button>
-            )}
-          </div>
+              <button
+                onClick={() => setCurrentMonth(new Date())}
+                className="px-4 py-2 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              >
+                <span className="text-lg font-semibold">{getMonthYear(currentMonth)}</span>
+              </button>
+              <button
+                onClick={() => navigateMonth("next")}
+                className="p-2 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              >
+                <ChevronRight size={24} />
+              </button>
+            </div>
 
-          {/* Total Section */}
-          <div className={isSidebarExpanded ? "mb-6" : "mb-2"}>
-            {isSidebarExpanded ? (
-              <div className="space-y-2">
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3">TOTAL</span>
-                <div className="relative">
-                  <button
-                    onClick={() => setIsTotalsDropdownOpen(!isTotalsDropdownOpen)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
-                      isTotalsDropdownOpen
-                        ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400"
-                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                    }`}
-                  >
-                    <DollarSign size={18} className="flex-shrink-0" />
-                    <span className="text-sm font-medium flex-1 text-left">
-                      {formatCurrency(convertedTotal, homeCurrency)}
-                    </span>
-                    <ChevronDown
-                      size={18}
-                      className={`flex-shrink-0 transition-transform ${isTotalsDropdownOpen ? "rotate-180" : ""}`}
+            <div className="text-right">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Income</p>
+              <p className="text-3xl font-bold text-green-600 dark:text-green-400">
+                {formatCurrency(totalIncome, homeCurrency)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Projects Grid */}
+        {projects.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 mb-6">
+              <Briefcase size={48} className="text-gray-400 dark:text-gray-500" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              No projects yet
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Create your first project to start tracking income by client
+            </p>
+            <Button
+              onClick={() => setIsCreateProjectModalOpen(true)}
+              className="inline-flex items-center gap-2"
+            >
+              <Plus size={20} />
+              Create First Project
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {projects.map((project, index) => {
+              const currentIncome = calculateProjectIncome(project.id, currentMonth);
+              const previousIncome = calculatePreviousMonthIncome(project.id, currentMonth);
+              const percentageChange = calculatePercentageChange(currentIncome, previousIncome);
+              const isPositive = percentageChange >= 0;
+
+              return (
+                <div
+                  key={project.id}
+                  onClick={() => router.push(`/income/project/${project.id}`)}
+                  className={`p-6 rounded-2xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-xl ${getProjectColor(
+                    index
+                  )}`}
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-white dark:bg-gray-900/50">
+                        <FolderOpen size={24} className="text-gray-700 dark:text-gray-300" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                          {project.name}
+                        </h3>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 capitalize">
+                          {project.status.replace("_", " ")}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowRight
+                      size={20}
+                      className="text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300"
                     />
-                  </button>
+                  </div>
 
-                  {/* Dropdown */}
-                  {isTotalsDropdownOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setIsTotalsDropdownOpen(false)} />
-                      <div className="absolute top-full mt-2 left-0 w-full min-w-[200px] bg-[#f8fafc] dark:bg-[#0f0f0f] rounded-xl border-2 border-gray-200 dark:border-gray-700 shadow-xl z-20 overflow-hidden animate-fadeIn">
-                        <div className="p-1">
-                          {Object.entries(totals).map(([currency, amount]) => (
-                            <button
-                              key={currency}
-                              onClick={() => {
-                                setSelectedCurrency(currency);
-                                setIsTotalsDropdownOpen(false);
-                              }}
-                              className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-xs ${
-                                selectedCurrency === currency ? "bg-indigo-50 dark:bg-indigo-900/20" : ""
-                              }`}
-                            >
-                              <span className="font-medium text-gray-900 dark:text-white">{currency}</span>
-                              <span className="font-semibold text-gray-900 dark:text-white">
-                                {formatCurrency(amount, currency)}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                        <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-[#f1f5f9] dark:bg-[#0a0a0a]">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                              Total ({homeCurrency})
-                            </span>
-                            <span className="text-sm font-bold text-indigo-500 dark:text-indigo-400">
-                              {formatCurrency(convertedTotal, homeCurrency)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsSidebarExpanded(true)}
-                className="w-full p-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                title="Total"
-              >
-                <DollarSign size={20} />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 ml-16 p-4 pb-24">
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Income</h1>
-                <p className="text-gray-600 dark:text-gray-400 mt-1">Track your earnings and sources</p>
-              </div>
-              <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2">
-                <Plus size={18} />
-                Add Income
-              </Button>
-            </div>
-          </div>
-
-          {/* Filters */}
-          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="Filter by Source"
-              options={[
-                { value: "all", label: "All Sources" },
-                ...incomeSources.map((s) => ({ value: s.id, label: s.name })),
-              ]}
-              value={selectedSource}
-              onChange={(value) => setSelectedSource(value)}
-            />
-            <Select
-              label="Filter by Currency"
-              options={[{ value: "all", label: "All Currencies" }, ...CURRENCIES]}
-              value={selectedCurrency}
-              onChange={(value) => setSelectedCurrency(value)}
-            />
-          </div>
-
-          {/* Transactions List */}
-          <Card>
-            <CardHeader
-              title="Transactions"
-              action={
-                <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
-                  title="Add Income"
-                >
-                  <Plus size={18} />
-                  <span className="text-sm font-medium">Add</span>
-                </button>
-              }
-            />
-            <CardContent>
-              {filteredTransactions.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500 dark:text-gray-400 mb-4">No income recorded for this month</p>
-                  <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
-                  >
-                    <Plus size={18} />
-                    <span>Add Income</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {filteredTransactions.map((transaction) => {
-                    const sourceName =
-                      incomeSources.find((s) => s.id === transaction.source)?.name ||
-                      transaction.source ||
-                      "Income";
-                    const isEditing = editingTransactionId === transaction.id;
-
-                    return (
-                      <div
-                        key={transaction.id}
-                        className={`p-4 rounded-2xl glass transition-all duration-200 ${
-                          isEditing ? "" : "cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800/50"
-                        }`}
-                        onClick={() => {
-                          if (!isEditing) {
-                            setSelectedTransaction(transaction);
-                            setIsTransactionDetailsOpen(true);
-                          }
-                        }}
-                      >
-                        {isEditing ? (
-                          <form
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              handleEditTransaction(transaction.id);
-                            }}
-                            className="space-y-3"
-                          >
-                            <div className="grid grid-cols-2 gap-3">
-                              <Input
-                                type="number"
-                                label="Amount"
-                                value={editTransactionAmount}
-                                onChange={(e) => setEditTransactionAmount(e.target.value)}
-                                step="0.01"
-                                min="0"
-                                required
-                              />
-                              <Select
-                                label="Currency"
-                                options={CURRENCIES}
-                                value={editTransactionCurrency}
-                                onChange={(value) => setEditTransactionCurrency(value)}
-                              />
-                            </div>
-                            <Input
-                              type="date"
-                              label="Date"
-                              value={editTransactionDate}
-                              onChange={(e) => setEditTransactionDate(e.target.value)}
-                              required
-                            />
-                            <Input
-                              type="text"
-                              label="Notes (optional)"
-                              value={editTransactionNotes}
-                              onChange={(e) => setEditTransactionNotes(e.target.value)}
-                            />
-                            <div className="flex items-center gap-2">
-                              <Button
-                                type="submit"
-                                size="sm"
-                                isLoading={isEditingTransaction}
-                                className="flex-1"
-                              >
-                                Save
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                onClick={cancelEditingTransaction}
-                                className="flex-1"
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          </form>
-                        ) : (
-                          <div className="flex items-center justify-between group">
-                            <div className="flex items-center gap-3 flex-1">
-                              <div className="p-2 rounded-xl bg-green-100 dark:bg-green-900/30">
-                                <TrendingUp className="text-green-600 dark:text-green-400" size={20} />
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p className="font-medium text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                                    {sourceName}
-                                  </p>
-                                  <ArrowRight
-                                    size={16}
-                                    className="text-gray-400 dark:text-gray-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors"
-                                  />
-                                </div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">
-                                  {formatDate(transaction.date)}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 ml-3">
-                              <p className="font-semibold text-gray-900 dark:text-white">
-                                +{formatCurrency(transaction.amount, transaction.currency)}
-                              </p>
-                              <div className="flex items-center gap-0.5">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startEditingTransaction(transaction);
-                                  }}
-                                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                                  title="Edit transaction"
-                                >
-                                  <Edit2 size={16} strokeWidth={2} />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openDeleteTransactionModal(transaction);
-                                  }}
-                                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                                  title="Delete transaction"
-                                >
-                                  <Trash2 size={16} strokeWidth={2} />
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Transaction Details Modal */}
-          <Modal
-            isOpen={isTransactionDetailsOpen}
-            onClose={() => {
-              setIsTransactionDetailsOpen(false);
-              setSelectedTransaction(null);
-            }}
-            title="Transaction Details"
-            headerActions={
-              selectedTransaction && (
-                <>
-                  <button
-                    onClick={() => {
-                      setIsTransactionDetailsOpen(false);
-                      startEditingTransaction(selectedTransaction);
-                    }}
-                    className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-                    title="Edit transaction"
-                  >
-                    <Edit2 size={18} className="text-gray-700 dark:text-gray-400" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsTransactionDetailsOpen(false);
-                      openDeleteTransactionModal(selectedTransaction);
-                    }}
-                    className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
-                    title="Delete transaction"
-                  >
-                    <Trash2 size={18} className="text-gray-700 dark:text-gray-400" />
-                  </button>
-                </>
-              )
-            }
-          >
-            {selectedTransaction && (
-              <div className="space-y-4">
-                {/* Amount */}
-                <div className="p-4 rounded-xl glass border-2 border-green-200 dark:border-green-800">
-                  <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Amount</p>
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    +{formatCurrency(selectedTransaction.amount, selectedTransaction.currency)}
-                  </p>
-                </div>
-
-                {/* Source */}
-                <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
-                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Source</p>
-                  <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {incomeSources.find((s) => s.id === selectedTransaction.source)?.name ||
-                      selectedTransaction.source ||
-                      "Income"}
-                  </p>
-                </div>
-
-                {/* Date & Time */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Date</p>
-                    <p className="text-base font-semibold text-gray-900 dark:text-white">
-                      {formatDate(selectedTransaction.date)}
+                  <div className="mb-3">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">This Month</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {formatCurrency(currentIncome, project.currency)}
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Time</p>
-                    <p className="text-base font-semibold text-gray-900 dark:text-white">
-                      {new Date(selectedTransaction.created_at).toLocaleTimeString("en-US", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: true,
-                      })}
-                    </p>
-                  </div>
-                </div>
 
-                {/* Currency */}
-                <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
-                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Currency</p>
-                  <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {selectedTransaction.currency}
-                  </p>
-                </div>
-
-                {/* Notes */}
-                {selectedTransaction.notes && (
-                  <div className="p-4 rounded-xl glass border-2 border-gray-200 dark:border-gray-700">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</p>
-                    <p className="text-base text-gray-900 dark:text-white">{selectedTransaction.notes}</p>
-                  </div>
-                )}
-
-                {/* Transaction ID */}
-                <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
-                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Transaction ID</p>
-                  <p className="text-xs font-mono text-gray-500 dark:text-gray-400 break-all">
-                    {selectedTransaction.id}
-                  </p>
-                </div>
-
-                {/* Close Button */}
-                <div className="pt-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setIsTransactionDetailsOpen(false);
-                      setSelectedTransaction(null);
-                    }}
-                    className="w-full"
-                  >
-                    Close
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Modal>
-
-          {/* Delete Transaction Confirmation Modal */}
-          <Modal
-            isOpen={isDeleteTransactionModalOpen}
-            onClose={closeDeleteTransactionModal}
-            title="Delete Transaction"
-          >
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800">
-                <p className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
-                  ⚠️ Warning: This action cannot be undone
-                </p>
-                <p className="text-sm text-red-700 dark:text-red-300">
-                  Are you sure you want to delete this transaction?
-                </p>
-                {deletingTransaction && (
-                  <div className="mt-3 p-3 rounded-lg bg-white dark:bg-gray-900 border border-red-200 dark:border-red-800">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                      {formatCurrency(deletingTransaction.amount, deletingTransaction.currency)}
-                    </p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">
-                      {formatDate(deletingTransaction.date)}
-                    </p>
-                    {deletingTransaction.notes && (
-                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                        {deletingTransaction.notes}
-                      </p>
+                  <div className="flex items-center gap-2">
+                    {isPositive ? (
+                      <TrendingUp size={16} className="text-green-600 dark:text-green-400" />
+                    ) : (
+                      <TrendingDown size={16} className="text-red-600 dark:text-red-400" />
                     )}
+                    <span
+                      className={`text-sm font-medium ${
+                        isPositive
+                          ? "text-green-600 dark:text-green-400"
+                          : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {isPositive ? "+" : ""}
+                      {percentageChange.toFixed(1)}%
+                    </span>
+                    <span className="text-xs text-gray-600 dark:text-gray-400">vs last month</span>
                   </div>
-                )}
-              </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-              <div className="flex items-center gap-3 pt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={closeDeleteTransactionModal}
-                  className="flex-1"
-                  disabled={isDeletingTransaction}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleDeleteTransaction}
-                  className="flex-1 bg-red-600 hover:bg-red-700"
-                  isLoading={isDeletingTransaction}
-                >
-                  Delete Transaction
-                </Button>
-              </div>
+        {/* Create Project Modal */}
+        <Modal
+          isOpen={isCreateProjectModalOpen}
+          onClose={() => setIsCreateProjectModalOpen(false)}
+          title="Create New Project"
+        >
+          <form onSubmit={handleCreateProject} className="space-y-4">
+            <Input
+              type="text"
+              label="Project Name"
+              placeholder="e.g., Acme Corp, Website Redesign"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              required
+            />
+
+            <Select
+              label="Currency"
+              options={CURRENCIES}
+              value={projectCurrency}
+              onChange={(value) => setProjectCurrency(value)}
+            />
+
+            <Select
+              label="Status"
+              options={[
+                { value: "active", label: "Active" },
+                { value: "completed", label: "Completed" },
+                { value: "on_hold", label: "On Hold" },
+              ]}
+              value={projectStatus}
+              onChange={(value) => setProjectStatus(value as "active" | "completed" | "on_hold")}
+            />
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Notes (optional)
+              </label>
+              <textarea
+                value={projectNotes}
+                onChange={(e) => setProjectNotes(e.target.value)}
+                placeholder="Add project details, rates, deadlines, etc."
+                className="w-full px-4 py-3 rounded-xl glass border-2 border-gray-200 dark:border-gray-700 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none transition-colors resize-none"
+                rows={4}
+              />
             </div>
-          </Modal>
 
-          {/* Add Income Modal */}
-          <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add Income">
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <Input
-                type="number"
-                label="Amount"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-                step="0.01"
-                min="0"
-              />
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-              <Select
-                label="Currency"
-                options={CURRENCIES}
-                value={currency}
-                onChange={(value) => setCurrency(value)}
-              />
-
-              <Input
-                type="text"
-                label="Source"
-                placeholder="e.g., Salary, Freelance, Business"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                required
-              />
-
-              <Input
-                type="date"
-                label="Date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                required
-              />
-
-              <Input
-                type="text"
-                label="Notes (optional)"
-                placeholder="Additional details"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-
-              {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-
-              <Button type="submit" className="w-full" isLoading={isSubmitting}>
-                Add Income
-              </Button>
-            </form>
-          </Modal>
-        </div>
+            <Button type="submit" className="w-full" isLoading={isSubmitting}>
+              Create Project
+            </Button>
+          </form>
+        </Modal>
       </div>
     </div>
   );

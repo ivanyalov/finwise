@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Transaction, IncomeSource, ExpenseCategory, UserSettings } from "@/lib/types";
+import { Transaction, IncomeSource, ExpenseCategory, UserSettings, Project } from "@/lib/types";
 import { supabase } from "@/lib/supabase/client";
 import { calculateConvertedAmount } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ interface StoreState {
   transactions: Transaction[];
   incomeSources: IncomeSource[];
   expenseCategories: ExpenseCategory[];
+  projects: Project[];
   settings: UserSettings | null;
   isLoading: boolean;
 
@@ -20,9 +21,13 @@ interface StoreState {
   setTransactions: (transactions: Transaction[]) => void;
   setIncomeSources: (sources: IncomeSource[]) => void;
   setExpenseCategories: (categories: ExpenseCategory[]) => void;
+  setProjects: (projects: Project[]) => void;
   setSettings: (settings: UserSettings) => void;
   setLoading: (loading: boolean) => void;
   addTransaction: (transaction: Transaction) => void;
+  addProject: (project: Project) => void;
+  updateProject: (id: string, updates: Partial<Project>) => void;
+  deleteProject: (id: string) => void;
 
   // Computed values
   getTransactionsByType: (type: string) => Transaction[];
@@ -39,6 +44,7 @@ export const useStore = create<StoreState>((set, get) => ({
   transactions: [],
   incomeSources: [],
   expenseCategories: [],
+  projects: [],
   settings: null,
   isLoading: false,
 
@@ -55,6 +61,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setTransactions: (transactions) => set({ transactions }),
   setIncomeSources: (sources) => set({ incomeSources: sources }),
   setExpenseCategories: (categories) => set({ expenseCategories: categories }),
+  setProjects: (projects) => set({ projects }),
   setSettings: (settings) => set({ 
     settings, 
     homeCurrency: settings.home_currency || "USD",
@@ -62,6 +69,13 @@ export const useStore = create<StoreState>((set, get) => ({
   }),
   setLoading: (loading) => set({ isLoading: loading }),
   addTransaction: (transaction) => set((state) => ({ transactions: [transaction, ...state.transactions] })),
+  addProject: (project) => set((state) => ({ projects: [project, ...state.projects] })),
+  updateProject: (id, updates) => set((state) => ({ 
+    projects: state.projects.map(p => p.id === id ? { ...p, ...updates } : p) 
+  })),
+  deleteProject: (id) => set((state) => ({ 
+    projects: state.projects.filter(p => p.id !== id) 
+  })),
 
   getTransactionsByType: (type) => {
     return get().transactions.filter((t) => t.type === type);

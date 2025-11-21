@@ -9,9 +9,21 @@ export type Transaction = {
   notes?: string;
   category?: string;
   source?: string;
+  project_id?: string;
   transfer_type?: "to_savings" | "from_savings";
   created_at: string;
   user_id: string;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  currency: string;
+  status: "active" | "completed" | "on_hold";
+  notes?: string;
+  user_id: string;
+  created_at: string;
+  updated_at?: string;
 };
 
 export type IncomeSource = {

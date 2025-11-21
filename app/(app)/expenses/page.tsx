@@ -45,6 +45,7 @@ export default function ExpensesPage() {
     homeCurrency,
     transactions,
     expenseCategories,
+    projects,
     setUser,
     setExpenseCategories,
     setLoading,
@@ -103,6 +104,7 @@ export default function ExpensesPage() {
   const [category, setCategory] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
   const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -185,6 +187,19 @@ export default function ExpensesPage() {
         console.error("Error loading categories:", catError);
       } else if (categoriesData) {
         setExpenseCategories(categoriesData);
+      }
+
+      // Load projects
+      const { data: projectsData, error: projectsError } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("name");
+
+      if (projectsError) {
+        console.error("Error loading projects:", projectsError);
+      } else if (projectsData) {
+        useStore.setState({ projects: projectsData });
       }
 
       // Load settings including budget
@@ -325,6 +340,7 @@ export default function ExpensesPage() {
           date,
           category: categoryId,
           notes: notes || null,
+          project_id: selectedProjectId || null,
           user_id: user?.id,
         })
         .select()
@@ -344,6 +360,7 @@ export default function ExpensesPage() {
       setCategory("");
       setSelectedCategoryId("");
       setIsCreatingNewCategory(false);
+      setSelectedProjectId("");
       setCurrency("USD");
       setDate(new Date().toISOString().split("T")[0]);
       setNotes("");
@@ -1966,6 +1983,7 @@ export default function ExpensesPage() {
           setIsModalOpen(false);
           setSelectedCategoryId("");
           setIsCreatingNewCategory(false);
+          setSelectedProjectId("");
         }} title="Add Expense">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
@@ -2052,6 +2070,19 @@ export default function ExpensesPage() {
               placeholder="Additional details"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+            />
+
+            <Select
+              label="Link to Project (optional)"
+              options={[
+                { value: "", label: "No project" },
+                ...projects.map((p) => ({ 
+                  value: p.id, 
+                  label: `${p.name} (${p.currency})` 
+                }))
+              ]}
+              value={selectedProjectId}
+              onChange={(value) => setSelectedProjectId(value)}
             />
 
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
